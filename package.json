@@ -1,0 +1,31 @@
+{
+	"name": "thai-water-way",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "cf dev",
+		"build": "cf build",
+		"deploy": "cf deploy",
+		"typecheck": "cf workers types && tsc && tsc -p tsconfig.client.json",
+		"data:canals": "bun scripts/fetch-canals.mjs",
+		"data:network": "EXTRA=samutprakan bun scripts/build-network.mjs",
+		"data:terrain": "bun scripts/build-terrain.mjs fabdem --calibrate bma-spot",
+		"data:infra": "EXTRA=samutprakan bun scripts/build-infra.mjs",
+		"data:ponding": "bun scripts/fit-ponding.mjs",
+		"data:rebuild": "bun run data:network && bun run data:infra && bun run data:terrain && bun run data:banks && bun run data:boundary && bun run data:levels && bun run data:ponding && bun run data:hotspots",
+		"data:levels": "bun scripts/extra/add-thaiwater-levels.mjs",
+		"data:banks": "bun scripts/build-banks.mjs",
+		"data:boundary": "bun scripts/build-boundary.mjs",
+		"data:hotspots": "bun scripts/fit-hotspots.mjs",
+		"data:publish": "bun scripts/publish-data.mjs"
+	},
+	"devDependencies": {
+		"@cloudflare/vite-plugin": "beta",
+		"@types/geojson": "^7946.0.16",
+		"cf": "^1.0.0-beta.10",
+		"geotiff": "^3.0.5",
+		"maplibre-gl": "^6.11.2",
+		"typescript": "^7.0.2",
+		"vite": "^8.3.0"
+	}
+}

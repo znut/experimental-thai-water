@@ -1,0 +1,311 @@
+import { env } from "cloudflare:workers";
+import { LAYERS, type LayerName, type PointFeature, type Props, type Snapshot, type Status } from "../shared/types.ts";
+
+const BMA = "https://weather.bangkok.go.th";
+const THAIWATER = "https://api-v3.thaiwater.net/api/v1/thaiwater30/public";
+const TIDE = "https://fews2.hii.or.th/model-output/data_portal/tide_table/summary.txt";
+const TRAFFY = "https://publicapi.traffy.in.th/teamchadchart-stat-api/geojson/v1";
+
+// Traffy Fondue state (Thai) -> short English.
+const TRAFFY_STATE: Record<string, string> = {
+	"รอรับเรื่อง": "waiting",
+	"รับเรื่อง": "received",
+	"ส่งต่อ": "forwarded",
+	"กำลังดำเนินการ": "in progress",
+	"เสร็จสิ้น": "resolved",
+	"ไม่เกี่ยวข้อง / ยกเลิก": "cancelled",
+};
+// "2026-10-01 21:55:43" is Bangkok time.
+const bkkMs = (s: unknown) => (typeof s === "string" ? Date.parse(s.replace(" ", "T") + "+07:00") : NaN);
+
+
+type Row = Record<string, any>;
+
+async function getJson(url: string, init?: RequestInit): Promise<any> {
+	const res = await fetch(url, {
+		...init,
+		headers: { "user-agent": "thai-water-way", accept: "application/json", ...init?.headers },
+		signal: AbortSignal.timeout(25_000),
+	});
+	if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
+	return res.json();
+}
+
+// BMA timestamps come as "/Date(1790852400000)/".
+function msDate(v: unknown): string | null {
+	const m = typeof v === "string" && /\/Date\((\d+)\)\//.exec(v);
+	return m ? new Date(Number(m[1])).toISOString() : null;
+}
+
+function num(v: unknown): number | null {
+	if (v === null || v === undefined || v === "") return null;
+	const n = Number(v);
+	return Number.isFinite(n) ? n : null;
+}
+
+function point(lat: unknown, lon: unknown, properties: PointFeature["properties"]): PointFeature | null {
+	const y = num(lat), x = num(lon);
+	if (y === null || x === null || (y === 0 && x === 0)) return null;
+	return { type: "Feature", geometry: { type: "Point", coordinates: [x, y] }, properties };
+}
+
+const pumpStates = (r: Row, n: number) =>
+	Array.from({ length: n }, (_, i) => r[`pump_status${i + 1}`] ?? "-").join(",");
+
+// Each source returns point features for one layer.
+const SOURCES: Record<LayerName, { source: string; load: () => Promise<(PointFeature | null)[]> }> = {
+	flood: {
+		source: "BMA DDS road flood sensors",
+		load: async () => {
+			const j = await getJson(`${BMA}/Flood/PageMap/GetData?id=0`);
+			return (j.dtTbl as Row[]).map((r) =>
+				point(r.latitude, r.longitude, {
+					id: r.flood_code,
+					name: r.flood_name_en || r.flood_name,
+					depth_cm: num(r.flood),
+					max_cm: num(r.flood_max),
+					status: r.chkStatustxt_en ?? null,
+					time: msDate(r.site_timestamp),
+				}),
+			);
+		},
+	},
+	pump: {
+		source: "BMA DDS main pump stations",
+		load: async () => {
+			const j = await getJson(`${BMA}/Station/Map/GetData?id=0`);
+			return (j.LastPump as Row[]).map((r) =>
+				point(r.latitude, r.longitude, {
+					id: r.pumpStation_code,
+					name: r.pumpStation_name_en || r.pumpStation_name,
+					pump_count: num(r.pump_count),
+					pumps: pumpStates(r, 6),
+					level_in_m: num(r.water_level),
+					level_out_m: num(r.water_level_out),
+					time: msDate(r.site_timestamp_last),
+				}),
+			);
+		},
+	},
+	smallpump: {
+		source: "BMA DDS small pump wells",
+		load: async () => {
+			const j = await getJson(`${BMA}/Pump/Map/GetData?id=0`);
+			return (j.LastPump as Row[]).map((r) =>
+				point(r.latitude, r.longitude, {
+					id: r.pumpStation_code,
+					name: r.pumpStation_name_en || r.pumpStation_name,
+					pump_count: num(r.pump_count),
+					pumps: pumpStates(r, 5),
+					level_m: num(r.water_level),
+					time: msDate(r.site_timestamp_last),
+				}),
+			);
+		},
+	},
+	flow: {
+		source: "BMA DDS canal flow stations",
+		load: async () => {
+			const j = await getJson(`${BMA}/flow/PageMap/GetData?id=0`);
+			return (j.dtStn as Row[]).map((r) =>
+				point(r.latitude, r.longitude, {
+					id: r.flow_code,
+					name: r.flow_name_en || r.flow_name,
+					flow_m3s: num(r.flow),
+					level_m: num(r.wl),
+					velocity_ms: num(r.mean_velocity),
+					warning_m: num(r.warning),
+					critical_m: num(r.critical),
+					time: msDate(r.site_timestamp),
+				}),
+			);
+		},
+	},
+	level: {
+		source: "BMA DDS canal water levels",
+		load: async () => {
+			const j = await getJson(`${BMA}/Klongmap/GetDataForUpdate`);
+			return (j.waterStation as Row[])
+				.filter((r) => r.water_station_info?.water_code)
+				.map(({ water_station_info: i, water_level_last: v }) => {
+					// -99 means "no sensor on this side of the gate".
+					const wl = (x: unknown) => (num(x) === -99 ? null : num(x));
+					return point(i.latitude, i.longitude, {
+						id: i.water_code,
+						name: i.water_shortname_en || i.water_name,
+						canal: i.river_name ?? null,
+						level_in_m: wl(v?.wl_in),
+						level_out_m: wl(v?.wl_out01),
+						bank_m: num(Math.min(i.left_bank ?? Infinity, i.right_bank ?? Infinity)),
+						bed_m: num(i.bed_bank),
+						warning_m: num(i.warning),
+						critical_m: num(i.critical),
+						time: msDate(v?.site_timestamp),
+					});
+				});
+		},
+	},
+	rain: {
+		source: "BMA DDS rain gauges",
+		load: async () => {
+			const rows: Row[] = await getJson(`${BMA}/rain/PageMap/GetDataForUpdate`, { method: "POST", body: "" });
+			return rows.map((r) =>
+				point(r.latitude, r.longitude, {
+					id: r.rain_code,
+					name: r.rain_name_en || r.rain_name,
+					rf1hr_mm: num(r.rf1hr),
+					rf3hr_mm: num(r.rf3hr),
+					rf24hr_mm: num(r.rf24hr),
+					time: msDate(r.site_timestamp),
+				}),
+			);
+		},
+	},
+	reports: {
+		source: "Traffy Fondue citizen flood reports (BMA / NECTEC)",
+		load: async () => {
+			// Last 3 days; keep reports still open plus anything from the last 24 h. Photos and
+			// free text are personal and not ours to re-host, so only location, state and times.
+			const now = Date.now();
+			const day = (ms: number) => new Date(ms + 7 * 3600_000).toISOString().slice(0, 10);
+			const rows: Row[] = [];
+			for (let offset = 0; offset < 10_000; offset += 1000) {
+				const j = await getJson(`${TRAFFY}?limit=1000&offset=${offset}&start=${day(now - 3 * 86400_000)}&end=${day(now)}`);
+				rows.push(...(j.features ?? []));
+				if ((j.features ?? []).length < 1000) break;
+			}
+			return rows
+				.filter((f) => JSON.stringify(f.properties?.problem_type_fondue ?? "").includes("น้ำท่วม"))
+				.map((f) => {
+					const p = f.properties;
+					const at = bkkMs(p.timestamp);
+					const state = TRAFFY_STATE[p.state] ?? p.state;
+					const open = !["resolved", "cancelled"].includes(state);
+					if (!open && now - at > 86400_000) return null;
+					return point(f.geometry?.coordinates?.[1], f.geometry?.coordinates?.[0], {
+						id: p.ticket_id,
+						name: [...new Set([p.subdistrict, p.district].filter(Boolean))].join(", ") || "Flood report",
+						district: p.district ?? null,
+						state,
+						open,
+						age_h: Number.isFinite(at) ? Math.round((now - at) / 360_000) / 10 : null,
+						hours_to_close: typeof p.duration_minutes_finished === "number" ? Math.round(p.duration_minutes_finished / 6) / 10 : null,
+						time: Number.isFinite(at) ? new Date(at).toISOString() : null,
+					});
+				});
+		},
+	},
+	river: {
+		source: "HII ThaiWater telemetry, all Thailand (incl. RID)",
+		load: async () => {
+			const j = await getJson(`${THAIWATER}/waterlevel_load`);
+			return (j.waterlevel_data.data as Row[]).map((r) =>
+					point(r.station?.tele_station_lat, r.station?.tele_station_long, {
+						id: r.station?.tele_station_oldcode || String(r.station?.id),
+						name: r.station?.tele_station_name?.en || r.station?.tele_station_name?.th,
+						river: r.river_name ?? null,
+						level_msl: num(r.waterlevel_msl),
+						bank_msl: num(r.station?.min_bank),
+						discharge_m3s: num(r.discharge),
+						// ThaiWater situation 1-5; 5 = over bank ("ล้นตลิ่ง").
+						situation: num(r.situation_level),
+						over_bank_m: r.diff_wl_bank_text?.startsWith("ล้น") ? num(r.diff_wl_bank) : null,
+						province: r.geocode?.province_name?.en ?? null,
+						district: r.geocode?.amphoe_name?.en ?? null,
+						time: r.waterlevel_datetime ?? null,
+					}),
+				);
+		},
+	},
+};
+
+async function refresh(): Promise<Status> {
+	const prev: Status = (await env.SNAPSHOTS.get("status", "json")) ?? {};
+	const status: Status = { ...prev };
+	const fetchedAt = new Date().toISOString();
+
+	await Promise.all([
+		...LAYERS.map(async (layer) => {
+			try {
+				const features = (await SOURCES[layer].load()).filter((f): f is PointFeature => f !== null);
+				const snap: Snapshot = { type: "FeatureCollection", layer, source: SOURCES[layer].source, fetchedAt, features };
+				await env.SNAPSHOTS.put(`layer:${layer}`, JSON.stringify(snap));
+				status[layer] = { ok: true, fetchedAt, count: features.length };
+			} catch (e) {
+				// Keep the last good snapshot; just record the failure.
+				status[layer] = { ok: false, fetchedAt, error: String(e) };
+			}
+		}),
+		(async () => {
+			try {
+				const res = await fetch(TIDE, { signal: AbortSignal.timeout(25_000) });
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				await env.SNAPSHOTS.put("tide", await res.text());
+				status.tide = { ok: true, fetchedAt };
+			} catch (e) {
+				status.tide = { ok: false, fetchedAt, error: String(e) };
+			}
+		})(),
+	]);
+
+	await env.SNAPSHOTS.put("status", JSON.stringify(status));
+	return status;
+}
+
+const json = (body: string | null, maxAge = 60) =>
+	body === null
+		? new Response("not found", { status: 404 })
+		: new Response(body, { headers: { "content-type": "application/json", "cache-control": `public, max-age=${maxAge}` } });
+
+// --- Built data files from R2 ("<version>/<path>"; the "current" object names the live version).
+// The pointer is cached per isolate briefly so most requests cost one R2 read.
+let current: { version: string | null; at: number } | null = null;
+async function dataVersion(): Promise<string | null> {
+	if (current && Date.now() - current.at < 60_000) return current.version;
+	const obj = await env.DATA.get("current");
+	current = { version: obj ? (await obj.text()).trim() : null, at: Date.now() };
+	return current.version;
+}
+
+async function serveData(req: Request, path: string): Promise<Response> {
+	const version = await dataVersion();
+	const obj = version && !path.includes("..") ? await env.DATA.get(`${version}/${path}`) : null;
+	// Nothing published (local dev, or before the first publish): fall back to bundled assets.
+	if (!obj) return env.ASSETS.fetch(req);
+	const etag = `"${version}:${obj.etag}"`;
+	if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: { etag } });
+	return new Response(obj.body, {
+		headers: {
+			"content-type": obj.httpMetadata?.contentType ?? "application/octet-stream",
+			etag,
+			"x-data-version": version!,
+			// URLs aren't versioned, so keep browser caching short; data changes rarely.
+			"cache-control": "public, max-age=300, stale-while-revalidate=86400",
+		},
+	});
+}
+
+export default {
+	async fetch(req) {
+		const { pathname } = new URL(req.url);
+
+		if (pathname.startsWith("/data/")) return serveData(req, pathname.slice("/data/".length));
+
+		if (pathname === "/api/status") return json(await env.SNAPSHOTS.get("status"), 30);
+		if (pathname === "/api/tide") {
+			const text = await env.SNAPSHOTS.get("tide");
+			return text === null ? json(null) : new Response(text, { headers: { "content-type": "text/plain; charset=utf-8" } });
+		}
+
+		const m = /^\/api\/layers\/(\w+)$/.exec(pathname);
+		if (m && (LAYERS as readonly string[]).includes(m[1])) return json(await env.SNAPSHOTS.get(`layer:${m[1]}`));
+
+		return new Response("not found", { status: 404 });
+	},
+
+	async scheduled() {
+		const status = await refresh();
+		const failed = Object.entries(status).filter(([, s]) => !s?.ok);
+		if (failed.length) console.warn("refresh failures", JSON.stringify(failed));
+	},
+} satisfies ExportedHandler;

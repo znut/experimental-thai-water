@@ -1,0 +1,176 @@
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+:root {
+	--bg: #ffffff;
+	--fg: #1b1f24;
+	--muted: #5c6670;
+	--panel: rgb(255 255 255 / 0.92);
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #12161b;
+		--fg: #e6e9ec;
+		--muted: #9aa4ae;
+		--panel: rgb(18 22 27 / 0.92);
+	}
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	background: var(--bg);
+	color: var(--fg);
+	font: 14px/1.4 system-ui, sans-serif;
+}
+#map {
+	position: absolute;
+	inset: 0;
+}
+#panel {
+	position: absolute;
+	top: 12px;
+	left: 12px;
+	max-width: min(280px, calc(100vw - 48px));
+	padding: 12px 14px;
+	background: var(--panel);
+	border-radius: 8px;
+	box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+#panel h1 {
+	margin: 0 0 8px;
+	font-size: 16px;
+}
+#layers label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 0;
+}
+.swatch {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+}
+#status,
+.credit {
+	margin: 8px 0 0;
+	color: var(--muted);
+	font-size: 12px;
+}
+.maplibregl-popup-content {
+	color: #1b1f24;
+	font-size: 12px;
+}
+.maplibregl-popup-content table td:first-child {
+	color: #5c6670;
+	padding-right: 8px;
+}
+#panel {
+	max-height: calc(100vh - 48px);
+	overflow-y: auto;
+}
+#sim h2 {
+	margin: 12px 0 6px;
+	font-size: 14px;
+}
+#sim select,
+#sim .knob input {
+	width: 100%;
+}
+#sim .knob {
+	display: block;
+	margin: 4px 0;
+	font-size: 12px;
+}
+#sim button {
+	margin: 6px 0;
+}
+#sim-msg,
+#sim-clock,
+#sim-legend {
+	color: var(--muted);
+	font-size: 12px;
+}
+#sim-time,
+#sim-chart {
+	width: 100%;
+}
+#glance {
+	margin: 4px 0 8px;
+	font-size: 12.5px;
+	line-height: 1.5;
+}
+#glance .bad {
+	color: #c0392b;
+}
+#glance .ok {
+	color: #238b45;
+}
+@media (prefers-color-scheme: dark) {
+	#glance .bad {
+		color: #ff7b6b;
+	}
+	#glance .ok {
+		color: #74c476;
+	}
+}
+#legend {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 3px;
+	font-size: 11px;
+	color: var(--muted);
+}
+#legend i {
+	display: inline-block;
+	width: 14px;
+	height: 10px;
+	margin-left: 4px;
+	border-radius: 2px;
+}
+#layers h3 {
+	margin: 10px 0 2px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--muted);
+}
+#panel {
+	max-width: min(320px, calc(100vw - 48px));
+}
+#places {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: 6px;
+}
+#places button {
+	font-size: 11px;
+	padding: 2px 6px;
+	border-radius: 10px;
+	border: 1px solid var(--muted);
+	background: transparent;
+	color: var(--fg);
+	cursor: pointer;
+}
+#glance .watch {
+	margin-top: 6px;
+	padding-top: 6px;
+	border-top: 1px solid rgb(127 127 127 / 0.3);
+}
+.maplibregl-popup-content .pop-title {
+	font-weight: 600;
+	font-size: 13px;
+	margin-right: 14px;
+}
+.maplibregl-popup-content .pop-id {
+	color: #5c6670;
+	font-size: 11px;
+	margin-bottom: 4px;
+}
+.maplibregl-popup-content .dots {
+	color: #238b45;
+	letter-spacing: 1px;
+}

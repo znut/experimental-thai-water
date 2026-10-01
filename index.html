@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Bangkok Water Map</title>
+		<link rel="stylesheet" href="/src/style.css" />
+	</head>
+	<body>
+		<div id="map"></div>
+		<aside id="panel">
+			<h1>Bangkok Water Map</h1>
+			<div id="places"></div>
+			<div id="glance">Loading…</div>
+			<div id="legend"></div>
+			<div id="layers"></div>
+			<p id="status">Loading…</p>
+			<section id="sim"></section>
+			<p class="credit">
+				Data: BMA Department of Drainage and Sewerage, HII ThaiWater, RID, HII tide tables. Ground: FABDEM V1-2 (CC BY-NC-SA,
+				University of Bristol) corrected with BMA spot heights. Map © OpenStreetMap contributors, OpenFreeMap.
+			</p>
+		</aside>
+		<script type="module" src="/src/main.ts"></script>
+	</body>
+</html>
