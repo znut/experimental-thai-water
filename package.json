@@ -12,12 +12,13 @@
 		"data:terrain": "bun scripts/build-terrain.mjs fabdem --calibrate bma-spot",
 		"data:infra": "EXTRA=samutprakan bun scripts/build-infra.mjs",
 		"data:ponding": "bun scripts/fit-ponding.mjs",
-		"data:rebuild": "bun run data:network && bun run data:infra && bun run data:terrain && bun run data:banks && bun run data:boundary && bun run data:levels && bun run data:ponding && bun run data:hotspots",
+		"data:rebuild": "bun run data:network && bun run data:infra && bun run data:terrain && bun run data:banks && bun run data:boundary && bun run data:levels && bun run data:ponding && bun run data:hotspots && bun run data:record",
 		"data:levels": "bun scripts/extra/add-thaiwater-levels.mjs",
 		"data:banks": "bun scripts/build-banks.mjs",
 		"data:boundary": "bun scripts/build-boundary.mjs",
 		"data:hotspots": "bun scripts/fit-hotspots.mjs",
-		"data:publish": "bun scripts/publish-data.mjs"
+		"data:publish": "bun scripts/publish-data.mjs",
+		"data:record": "bun scripts/record-build.mjs"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "beta",
