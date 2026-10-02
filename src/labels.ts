@@ -59,6 +59,7 @@ const FIELDS: Record<string, Fmt> = {
 	bank_m: { label: "Bank top", fmt: msl },
 	bed_m: { label: "Canal bed", fmt: msl },
 	// rain
+	agency: { label: "Measured by" },
 	rf1hr_mm: { label: "Rain, last hour", fmt: (v) => `${v} mm` },
 	rf3hr_mm: { label: "Rain, last 3 h", fmt: (v) => `${v} mm` },
 	rf24hr_mm: { label: "Rain, last 24 h", fmt: (v) => `${v} mm` },

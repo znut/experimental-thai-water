@@ -10,30 +10,42 @@ export const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
 
 export const UA = { "user-agent": "Mozilla/5.0 (thai-water-way data build)" };
 
+// Public government sources: download history once and cache it; keep few requests in flight.
+// A history window is "settled" (safe to cache) once it ended this long ago: sources backfill
+// late records. Windows not settled yet are fetched fresh and not cached.
+export const POLITE = 2; // max requests in flight to one government server
+export const settled = (endMs) => endMs < Date.now() - 6 * 3600_000;
+
 // Raw responses are cached so reruns don't hit the source servers again.
 const CACHE = new URL("../../node_modules/.cache/thai-water-way/", import.meta.url);
 
-/** fetch() returning text, cached on disk by URL + body. Throws on HTTP errors. */
-export async function cachedText(url, init = {}, { retries = 3, timeoutMs = 300_000, valid = () => true } = {}) {
+/**
+ * fetch() returning text, cached on disk by URL + body. Throws on HTTP errors.
+ * `cache: false` for data that can still change (a history window not settled yet): always
+ * fetched fresh, neither read from nor written to the cache.
+ */
+export async function cachedText(url, init = {}, { retries = 3, timeoutMs = 300_000, valid = () => true, cache = true } = {}) {
 	const key = createHash("sha1").update(url + "\n" + (init.body ?? "")).digest("hex");
 	const file = new URL(key, CACHE);
-	try {
-		return await readFile(file, "utf8");
-	} catch {}
+	if (cache)
+		try {
+			return await readFile(file, "utf8");
+		} catch {}
 	let lastErr;
 	for (let attempt = 0; attempt < retries; attempt++) {
 		try {
 			const res = await fetch(url, { ...init, headers: { ...UA, ...init.headers }, signal: AbortSignal.timeout(timeoutMs) });
-			if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
+			if (!res.ok) throw Object.assign(new Error(`${url} -> HTTP ${res.status}`), { status: res.status });
 			const text = await res.text();
 			// Some servers answer errors with HTTP 200; don't cache those.
 			if (!valid(text)) throw new Error(`${url} -> unexpected response: ${text.slice(0, 120)}`);
-			await mkdir(CACHE, { recursive: true });
-			await writeFile(file, text);
+			if (cache) await mkdir(CACHE, { recursive: true }), await writeFile(file, text);
 			return text;
 		} catch (e) {
 			lastErr = e;
-			await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+			// 403/429: the server is pushing back; give it a long pause before retrying.
+			const slow = e.status === 403 || e.status === 429;
+			await new Promise((r) => setTimeout(r, (slow ? 30_000 : 2000) * (attempt + 1)));
 		}
 	}
 	throw lastErr;

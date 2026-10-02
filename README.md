@@ -21,6 +21,12 @@ bun run vite dev --port 5199     # Vite on Node: the CF Vite plugin refuses the 
 - Deploy app: Workers Builds, build `bun run build`, deploy `bunx cf deploy --prebuilt`, `NODE_VERSION=24`.
 - Publish data: commit the data repo, then `bun run data:publish` (R2, versioned by data commit).
 
+Public government sources (BMA, HII/ThaiWater, RID, Traffy, …): use them moderately. Build
+scripts download history once and cache it (`scripts/lib/data.mjs`: at most `POLITE` = 2 requests
+in flight per server, long backoff on 403/429, a window is cached only once `settled`, 6 h after it
+ends). The Worker makes one request per source per 5-minute refresh. New sources follow the same
+rules.
+
 Code map: `worker/` live data and API · `src/main.ts` map · `src/sim/` canal model, ponding,
 UI · `scripts/` data pipeline · `shared/types.ts` data file shapes.
 

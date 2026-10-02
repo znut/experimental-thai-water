@@ -4,7 +4,7 @@
 // Other events: SCENARIO_ID=storm-2025-05 SCENARIO_START=2025-05-10 SCENARIO_DAYS=3 \
 //   SCENARIO_TITLE="..." SCENARIO_SKIP=level,traffy bun scripts/fetch-scenario.mjs
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { cachedJson, cachedText, pool, toXY } from "./lib/data.mjs";
+import { POLITE, cachedJson, cachedText, pool, settled, toXY } from "./lib/data.mjs";
 
 const ID = process.env.SCENARIO_ID ?? "rainbomb-2026-09";
 const START_DAY = process.env.SCENARIO_START ?? "2026-09-24";
@@ -37,6 +37,8 @@ const dmy = (ms) => {
 	const d = new Date(ms + 7 * 3600_000);
 	return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
 };
+// History is cached once settled (lib/data.mjs); a recent or open window is fetched fresh.
+const SETTLED = settled(START + DAYS * 86400_000);
 // The BMA history forms reject ranges longer than 3 days, so fetch in chunks.
 const CHUNKS = [];
 for (let d = 0; d < DAYS; d += 3) CHUNKS.push([START + d * 86400_000, START + Math.min(DAYS, d + 3) * 86400_000 - 5 * 60_000]);
@@ -49,12 +51,12 @@ const tableRows = (html, width, codeRe) => {
 };
 const num = (s) => (s === "" || s === undefined || s === null || Number.isNaN(Number(s)) ? null : Number(s));
 const round = (v, d) => (v === null ? null : Math.round(v * 10 ** d) / 10 ** d);
-const bmaForm = (path, fields) =>
+const bmaForm = (path, fields, endMs) =>
 	cachedText(
 		`${BMA}${path}`,
 		{ method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields).toString() },
 		// ASP.NET error pages come back as HTTP 200; don't cache them.
-		{ valid: (t) => !/Object reference not set|Server Error in/.test(t) },
+		{ valid: (t) => !/Object reference not set|Server Error in/.test(t), cache: settled(endMs) },
 	);
 
 // ---- Rain: BMA DDS gauges, 5-minute history ------------------------------------------------
@@ -63,7 +65,7 @@ async function rain() {
 	const stations = JSON.parse(page.match(/var\s+datawater\s*=\s*(\[[\s\S]*?\]);/)[1]).filter((s) => s.latitude && s.longitude);
 	log(`rain: ${stations.length} BMA gauges, fetching 5-min history…`);
 	let done = 0;
-	const series = await pool(stations, 6, async (st) => {
+	const series = await pool(stations, POLITE, async (st) => {
 		const mm = new Array(STEPS).fill(null);
 		const seen = new Array(STEPS).fill(0);
 		for (const [a, b] of CHUNKS) {
@@ -77,7 +79,7 @@ async function rain() {
 				rain_data: "1",
 				rain_field_selected: "0",
 				txtFilter: "0.0",
-			});
+			}, b);
 			// Columns: code, district, name, time, rf5min, rf15min, rf30min, rf1hr, rf3hr, rf6hr, rf12hr, rf24hr
 			for (const r of tableRows(html, 12, /^RF\./)) {
 				const i = stepOf(bmaTime(r[3]));
@@ -103,6 +105,8 @@ async function riverLevel() {
 	for (const [id, label] of tries) {
 		const j = await cachedJson(
 			`https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_graph?station_type=tele_waterlevel&station_id=${id}&start_date=${ymd(START)}&end_date=${ymd(START + (DAYS - 1) * 86400_000)}%2023:59`,
+			{},
+			{ cache: SETTLED },
 		);
 		const sum = new Array(STEPS).fill(0), n = new Array(STEPS).fill(0);
 		for (const p of j.data?.graph_data ?? []) {
@@ -134,7 +138,7 @@ async function floodSensors() {
 			limit: "20000",
 			page: String(page),
 		});
-		const j = await cachedJson(`https://floodbangkok.bangkok.go.th/api/flood/sensor_flood/history?${q}`);
+		const j = await cachedJson(`https://floodbangkok.bangkok.go.th/api/flood/sensor_flood/history?${q}`, {}, { cache: SETTLED });
 		for (const r of j.data) {
 			const s = depth.get(r.sensor_name);
 			const i = stepOf(Date.parse(r.date_created));
@@ -173,7 +177,7 @@ async function canalLevels() {
 	const chosen = [...cells.values()].slice(0, LEVEL_STATIONS);
 	log(`levels: ${chosen.length} of ${klong.length} stations (one per 3 km cell), fetching 5-min history…`);
 	let done = 0;
-	const out = await pool(chosen, 4, async (st) => {
+	const out = await pool(chosen, POLITE, async (st) => {
 		const sum = new Array(STEPS).fill(0), n = new Array(STEPS).fill(0);
 		for (const [a, b] of CHUNKS) {
 			const html = await bmaForm("/water/WaterHistory", {
@@ -186,7 +190,7 @@ async function canalLevels() {
 				rain_data: "1",
 				rain_field_selected: "0",
 				txtFilter: "0.0",
-			});
+			}, b);
 			// Columns: code, canal, station, time, level inside, outside, river (m MSL)
 			for (const r of tableRows(html, 7, /^WL\./)) {
 				const i = stepOf(bmaTime(r[3]));
@@ -211,6 +215,8 @@ async function traffy() {
 		for (let offset = 0; ; offset += 1000) {
 			const j = await cachedJson(
 				`https://publicapi.traffy.in.th/teamchadchart-stat-api/geojson/v1?limit=1000&start=${day}&end=${day}&offset=${offset}`,
+				{},
+				{ cache: settled(START + (d + 1) * 86400_000) },
 			);
 			for (const f of j.features ?? []) {
 				const p = f.properties;

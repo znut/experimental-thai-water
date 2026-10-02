@@ -5,7 +5,7 @@
 //    that drives the boundary is removed from observed.level so the model isn't scored on it.
 // Run: bun scripts/extra/add-thaiwater-levels.mjs [scenario-id ...]   (default: all recorded)
 import { readdir, readFile, writeFile } from "node:fs/promises";
-import { cachedJson, pool } from "../lib/data.mjs";
+import { POLITE, cachedJson, pool, settled } from "../lib/data.mjs";
 
 const API = "https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_graph";
 const dir = new URL("../../public/data/scenarios/", import.meta.url);
@@ -37,7 +37,7 @@ for (const id of ids) {
 
 	const history = async (tw_id) => {
 		const q = new URLSearchParams({ station_type: "tele_waterlevel", station_id: String(tw_id), start_date: bkk(t0).slice(0, 10), end_date: bkk(end) });
-		const j = await cachedJson(`${API}?${q}`);
+		const j = await cachedJson(`${API}?${q}`, {}, { cache: settled(end) });
 		const sum = new Array(sc.steps).fill(0), n = new Array(sc.steps).fill(0);
 		for (const r of j.data?.graph_data ?? []) {
 			if (typeof r.value !== "number") continue;
@@ -53,7 +53,7 @@ for (const id of ids) {
 	// Boundary gauges: model input, never scored.
 	sc.observed.level = sc.observed.level.filter((l) => !boundaryCodes.has(l.code));
 	sc.boundary = (
-		await pool(boundary.gauges, 4, async (g) => {
+		await pool(boundary.gauges, POLITE, async (g) => {
 			const level_m = await history(g.tw_id);
 			return level_m.some((v) => v !== null) ? { code: g.code, lon: g.lon, lat: g.lat, level_m } : null;
 		})
@@ -62,7 +62,7 @@ for (const id of ids) {
 	const added = (
 		await pool(
 			stations.filter(([code]) => !have.has(code)),
-			4,
+			POLITE,
 			async ([code, s]) => {
 				// Put the station on BMA's vertical reference where a co-located BMA gauge gave an offset.
 				const off = s.datum_offset_m ?? 0;

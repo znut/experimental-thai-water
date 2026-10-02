@@ -15,6 +15,9 @@ const TRAFFY_STATE: Record<string, string> = {
 	"เสร็จสิ้น": "resolved",
 	"ไม่เกี่ยวข้อง / ยกเลิก": "cancelled",
 };
+// ThaiWater rain gauges kept for the rain layer: Bangkok and its neighbouring provinces
+// (west, south, east, north).
+const RAIN_BBOX = [100.1, 13.4, 101.1, 14.3];
 // "2026-10-01 21:55:43" is Bangkok time.
 const bkkMs = (s: unknown) => (typeof s === "string" ? Date.parse(s.replace(" ", "T") + "+07:00") : NaN);
 
@@ -146,19 +149,44 @@ const SOURCES: Record<LayerName, { source: string; load: () => Promise<(PointFea
 		},
 	},
 	rain: {
-		source: "BMA DDS rain gauges",
+		source: "BMA DDS rain gauges + ThaiWater gauges (HII, TMD, DWR, …) in and around Bangkok",
 		load: async () => {
-			const rows: Row[] = await getJson(`${BMA}/rain/PageMap/GetDataForUpdate`, { method: "POST", body: "" });
-			return rows.map((r) =>
+			const [rows, tw] = await Promise.all([
+				getJson(`${BMA}/rain/PageMap/GetDataForUpdate`, { method: "POST", body: "" }) as Promise<Row[]>,
+				// Fills gaps outside BMA's network (Samut Prakan, Nonthaburi, …). Optional: BMA alone
+				// is still a useful layer, so a ThaiWater failure only drops these gauges.
+				getJson(`${THAIWATER}/rain_24h`).catch((e) => (console.warn("thaiwater rain_24h", String(e)), { data: [] })),
+			]);
+			const bma = rows.map((r) =>
 				point(r.latitude, r.longitude, {
 					id: r.rain_code,
 					name: r.rain_name_en || r.rain_name,
+					agency: "BMA",
 					rf1hr_mm: num(r.rf1hr),
 					rf3hr_mm: num(r.rf3hr),
 					rf24hr_mm: num(r.rf24hr),
 					time: msDate(r.site_timestamp),
 				}),
 			);
+			const [w, s, e, n] = RAIN_BBOX;
+			const others = (tw.data as Row[])
+				.filter((r) => {
+					const lon = num(r.station?.tele_station_long), lat = num(r.station?.tele_station_lat);
+					return lon !== null && lat !== null && lon >= w && lon <= e && lat >= s && lat <= n;
+				})
+				.map((r) => {
+					const at = bkkMs(r.rainfall_datetime);
+					return point(r.station.tele_station_lat, r.station.tele_station_long, {
+						id: r.station.tele_station_oldcode || String(r.station.id),
+						name: r.station.tele_station_name?.en || r.station.tele_station_name?.th,
+						agency: r.agency?.agency_shortname?.en ?? null,
+						rf1hr_mm: num(r.rain_1h), // TMD stations report 24 h only
+						rf3hr_mm: null,
+						rf24hr_mm: num(r.rain_24h),
+						time: Number.isFinite(at) ? new Date(at).toISOString() : null,
+					});
+				});
+			return [...bma, ...others];
 		},
 	},
 	reports: {
