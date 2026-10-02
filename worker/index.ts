@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { LAYERS } from "../shared/types.ts";
 import { due, refresh, type Store } from "./sources.ts";
 
 const r2: Store = {
@@ -22,7 +23,8 @@ export default {
 
 	async scheduled(controller) {
 		// The Worker's share of the sources (RUNS_ON in sources.ts); the laptop mirror does the rest.
-		const { layers, tide } = due(controller.scheduledTime, "worker");
+		// Local dev triggers {"cron":"all"} to refresh everything into local R2 (nothing blocks a laptop).
+		const { layers, tide } = controller.cron === "all" ? { layers: LAYERS, tide: true } : due(controller.scheduledTime, "worker");
 		const results = await refresh(r2, layers, tide);
 		const failed = Object.entries(results).filter(([, s]) => !s?.ok);
 		if (failed.length) console.warn("refresh failures", JSON.stringify(failed));

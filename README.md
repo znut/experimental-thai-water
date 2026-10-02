@@ -12,8 +12,8 @@ bun run vite dev --port 5199     # Vite on Node: the CF Vite plugin refuses the 
 ```
 
 Dev reads built data from `public/data` (symlink to `../thai-water-way-data`) and live data from
-the local Worker's R2. Local cron:
-`curl -X POST "localhost:5199/cdn-cgi/local/explorer/api/local/scheduled?worker=thai-water-way" -H 'content-type: application/json' -d '{"cron":"*/5 * * * *"}'`
+the local Worker's R2. The cron doesn't fire by itself in dev; refresh every source with:
+`curl -X POST "localhost:5199/cdn-cgi/local/explorer/api/local/scheduled?worker=thai-water-way" -H 'content-type: application/json' -d '{"cron":"all"}'`
 
 ## Deploy
 
