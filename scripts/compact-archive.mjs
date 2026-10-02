@@ -1,4 +1,4 @@
-// Compacts the raw 5-minute archive the cron writes (archive/raw/<layer>/<day>/<HHmm>.json) into
+// Compacts the raw 5-minute archive the refreshes write (archive/raw/<layer>/<day>/<HHmm>.json) into
 // one deduplicated file per layer per finished Bangkok day (archive/<layer>/<YYYY>/<day>.ndjson.gz),
 // deletes the raw objects, and rewrites archive/index.json. Runs on the laptop, any time: days
 // wait in raw form until it does. Safe to re-run; a day already compacted is merged, not lost.
@@ -7,24 +7,15 @@
 // first refresh that saw it. Readings repeated across refreshes are dropped.
 //
 // Run: bun scripts/compact-archive.mjs [--dry-run]
-// Needs an R2 API token (Object Read & Write on the data bucket) in .env:
-//   R2_ACCOUNT_ID=…  R2_ACCESS_KEY_ID=…  R2_SECRET_ACCESS_KEY=…
-import { S3Client } from "bun";
+// Needs an R2 API token in .env (scripts/lib/r2.mjs).
 import { gunzipSync, gzipSync } from "node:zlib";
-import { DATA_BUCKET } from "../shared/deploy.ts";
 import { KEY, bkkParts } from "../shared/data-layout.ts";
 import { LAYERS } from "../shared/types.ts";
 import { pool } from "./lib/data.mjs";
+import { r2 } from "./lib/r2.mjs";
 
 const DRY = process.argv.includes("--dry-run");
-const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = process.env;
-if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) throw new Error("set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY in .env");
-const s3 = new S3Client({
-	accessKeyId: R2_ACCESS_KEY_ID,
-	secretAccessKey: R2_SECRET_ACCESS_KEY,
-	bucket: DATA_BUCKET,
-	endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-});
+const s3 = r2();
 // Our own bucket, not a government server: more parallelism is fine.
 const PARALLEL = 16;
 // Derived from the fetch time, so it changes every refresh without new information.

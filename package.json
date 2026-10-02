@@ -19,7 +19,8 @@
 		"data:hotspots": "bun scripts/fit-hotspots.mjs",
 		"data:publish": "bun scripts/publish-data.mjs",
 		"data:record": "bun scripts/record-build.mjs",
-		"data:compact": "bun scripts/compact-archive.mjs"
+		"data:compact": "bun scripts/compact-archive.mjs",
+		"mirror": "bun scripts/mirror.mjs"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "beta",

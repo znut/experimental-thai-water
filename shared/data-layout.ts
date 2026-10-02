@@ -3,7 +3,7 @@
 
 // The R2 bucket served on a custom domain (a Cloudflare zone in the same account). Reads there hit
 // Cloudflare's cache, never the Worker. This is also the public API base.
-export const DATA_ORIGIN = "https://data.example.org"; // TODO: your data domain
+export const DATA_ORIGIN = "https://water.experiment.tripsters.me"; // app domain for now (Worker serves R2); later a data domain on the bucket
 
 // R2 keys = public API paths under DATA_ORIGIN.
 //   current.json                              {"version", "published_at", ...}: live built-data version
