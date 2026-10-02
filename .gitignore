@@ -12,3 +12,4 @@ dist/
 # Data lives in the sibling thai-water-way-data repo; these are symlinks into it.
 /data
 /public/data
+HANDOFF.md

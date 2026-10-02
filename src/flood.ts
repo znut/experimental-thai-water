@@ -2,6 +2,7 @@
 // cell, drawn as an image layer, darker = deeper.
 import type * as maplibregl from "maplibre-gl";
 import type { GroundMeta } from "../shared/types.ts";
+import { fetchBuilt } from "./data.ts";
 
 export interface Ground {
 	meta: GroundMeta;
@@ -10,7 +11,7 @@ export interface Ground {
 }
 
 export async function loadGround(networkBuild: string | undefined): Promise<Ground | null> {
-	const [m, b] = await Promise.all([fetch("/data/ground.json"), fetch("/data/ground.bin")]);
+	const [m, b] = await Promise.all([fetchBuilt("ground.json"), fetchBuilt("ground.bin")]);
 	if (!m.ok || !b.ok) return null;
 	const meta: GroundMeta = await m.json();
 	if (meta.builtFrom !== networkBuild) return null; // stale against this network

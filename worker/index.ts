@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { KEY, bkkParts } from "../shared/data-layout.ts";
 import { LAYERS, type LayerName, type PointFeature, type Props, type Snapshot, type Status } from "../shared/types.ts";
 
 const BMA = "https://weather.bangkok.go.th";
@@ -24,7 +25,7 @@ const bkkMs = (s: unknown) => (typeof s === "string" ? Date.parse(s.replace(" ",
 
 type Row = Record<string, any>;
 
-async function getJson(url: string, init?: RequestInit): Promise<any> {
+async function getJson(url: string, init?: RequestInit<RequestInitCfProperties>): Promise<any> {
 	const res = await fetch(url, {
 		...init,
 		headers: { "user-agent": "thai-water-way", accept: "application/json", ...init?.headers },
@@ -56,7 +57,9 @@ const pumpStates = (r: Row, n: number) =>
 	Array.from({ length: n }, (_, i) => r[`pump_status${i + 1}`] ?? "-").join(",");
 
 // Each source returns point features for one layer.
-const SOURCES: Record<LayerName, { source: string; load: () => Promise<(PointFeature | null)[]> }> = {
+// `every`: refresh interval in minutes (default 5), matched to how often the source changes, so
+// slow or bulky sources aren't re-downloaded every run (polite use, less CPU).
+const SOURCES: Record<LayerName, { source: string; every?: number; load: () => Promise<(PointFeature | null)[]> }> = {
 	flood: {
 		source: "BMA DDS road flood sensors",
 		load: async () => {
@@ -155,7 +158,8 @@ const SOURCES: Record<LayerName, { source: string; load: () => Promise<(PointFea
 				getJson(`${BMA}/rain/PageMap/GetDataForUpdate`, { method: "POST", body: "" }) as Promise<Row[]>,
 				// Fills gaps outside BMA's network (Samut Prakan, Nonthaburi, …). Optional: BMA alone
 				// is still a useful layer, so a ThaiWater failure only drops these gauges.
-				getJson(`${THAIWATER}/rain_24h`).catch((e) => (console.warn("thaiwater rain_24h", String(e)), { data: [] })),
+				// Nationwide (~4 MB) and updated about hourly: let Cloudflare's cache answer between updates.
+				getJson(`${THAIWATER}/rain_24h`, { cf: { cacheTtl: 900, cacheEverything: true } }).catch((e) => (console.warn("thaiwater rain_24h", String(e)), { data: [] })),
 			]);
 			const bma = rows.map((r) =>
 				point(r.latitude, r.longitude, {
@@ -191,6 +195,8 @@ const SOURCES: Record<LayerName, { source: string; load: () => Promise<(PointFea
 	},
 	reports: {
 		source: "Traffy Fondue citizen flood reports (BMA / NECTEC)",
+		// The API can't filter by type: 3 days is ~8 pages (~35 MB) of all complaints.
+		every: 15,
 		load: async () => {
 			// Last 3 days; keep reports still open plus anything from the last 24 h. Photos and
 			// free text are personal and not ours to re-host, so only location, state and times.
@@ -225,6 +231,7 @@ const SOURCES: Record<LayerName, { source: string; load: () => Promise<(PointFea
 	},
 	river: {
 		source: "HII ThaiWater telemetry, all Thailand (incl. RID)",
+		every: 10,
 		load: async () => {
 			const j = await getJson(`${THAIWATER}/waterlevel_load`);
 			return (j.waterlevel_data.data as Row[]).map((r) =>
@@ -247,92 +254,75 @@ const SOURCES: Record<LayerName, { source: string; load: () => Promise<(PointFea
 	},
 };
 
-async function refresh(): Promise<Status> {
-	const prev: Status = (await env.SNAPSHOTS.get("status", "json")) ?? {};
+// Cache lifetimes for objects the Worker writes (the data domain's Cache Rules set the same).
+const LIVE_CACHE = "public, max-age=60, stale-while-revalidate=300";
+const RAW_CACHE = "public, max-age=86400";
+
+const put = (key: string, body: string, contentType: string, cacheControl: string) =>
+	env.DATA.put(key, body, { httpMetadata: { contentType, cacheControl } });
+
+// One refresh: latest snapshot per layer to live/, the same bytes to the raw archive. Normalising
+// and writing is all the Worker does; serving is R2 + Cloudflare cache, cleaning is the laptop's.
+async function refresh(layers: readonly LayerName[], tide: boolean): Promise<Status> {
+	const prevObj = await env.DATA.get(KEY.live("status.json"));
+	const prev: Status = prevObj ? await prevObj.json() : {};
 	const status: Status = { ...prev };
-	const fetchedAt = new Date().toISOString();
+	const now = Date.now();
+	const fetchedAt = new Date(now).toISOString();
+	const { day, hhmm } = bkkParts(now);
+	const refreshTide = async () => {
+		try {
+			const res = await fetch(TIDE, { signal: AbortSignal.timeout(25_000) });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await put(KEY.live("tide.txt"), await res.text(), "text/plain; charset=utf-8", LIVE_CACHE);
+			status.tide = { ok: true, fetchedAt };
+		} catch (e) {
+			status.tide = { ok: false, fetchedAt, error: String(e) };
+		}
+	};
 
 	await Promise.all([
-		...LAYERS.map(async (layer) => {
+		...layers.map(async (layer) => {
 			try {
 				const features = (await SOURCES[layer].load()).filter((f): f is PointFeature => f !== null);
 				const snap: Snapshot = { type: "FeatureCollection", layer, source: SOURCES[layer].source, fetchedAt, features };
-				await env.SNAPSHOTS.put(`layer:${layer}`, JSON.stringify(snap));
+				const body = JSON.stringify(snap);
+				await Promise.all([
+					put(KEY.live(`${layer}.json`), body, "application/json", LIVE_CACHE),
+					put(KEY.raw(layer, day, hhmm), body, "application/json", RAW_CACHE),
+				]);
 				status[layer] = { ok: true, fetchedAt, count: features.length };
 			} catch (e) {
 				// Keep the last good snapshot; just record the failure.
 				status[layer] = { ok: false, fetchedAt, error: String(e) };
 			}
 		}),
-		(async () => {
-			try {
-				const res = await fetch(TIDE, { signal: AbortSignal.timeout(25_000) });
-				if (!res.ok) throw new Error(`HTTP ${res.status}`);
-				await env.SNAPSHOTS.put("tide", await res.text());
-				status.tide = { ok: true, fetchedAt };
-			} catch (e) {
-				status.tide = { ok: false, fetchedAt, error: String(e) };
-			}
-		})(),
+		tide && refreshTide(),
 	]);
 
-	await env.SNAPSHOTS.put("status", JSON.stringify(status));
+	await put(KEY.live("status.json"), JSON.stringify(status), "application/json", LIVE_CACHE);
 	return status;
 }
 
-const json = (body: string | null, maxAge = 60) =>
-	body === null
-		? new Response("not found", { status: 404 })
-		: new Response(body, { headers: { "content-type": "application/json", "cache-control": `public, max-age=${maxAge}` } });
-
-// --- Built data files from R2 ("<version>/<path>"; the "current" object names the live version).
-// The pointer is cached per isolate briefly so most requests cost one R2 read.
-let current: { version: string | null; at: number } | null = null;
-async function dataVersion(): Promise<string | null> {
-	if (current && Date.now() - current.at < 60_000) return current.version;
-	const obj = await env.DATA.get("current");
-	current = { version: obj ? (await obj.text()).trim() : null, at: Date.now() };
-	return current.version;
-}
-
-async function serveData(req: Request, path: string): Promise<Response> {
-	const version = await dataVersion();
-	const obj = version && !path.includes("..") ? await env.DATA.get(`${version}/${path}`) : null;
-	// Nothing published (local dev, or before the first publish): fall back to bundled assets.
-	if (!obj) return env.ASSETS.fetch(req);
-	const etag = `"${version}:${obj.etag}"`;
-	if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: { etag } });
-	return new Response(obj.body, {
-		headers: {
-			"content-type": obj.httpMetadata?.contentType ?? "application/octet-stream",
-			etag,
-			"x-data-version": version!,
-			// URLs aren't versioned, so keep browser caching short; data changes rarely.
-			"cache-control": "public, max-age=300, stale-while-revalidate=86400",
-		},
-	});
-}
+// In production the data domain serves R2 directly. This handler serves the same keys on the
+// app's own origin, for local dev (local R2) and as a fallback before the domain is set up.
+const SERVED = /^\/(current\.json|(?:live|archive|v)\/[\w./-]+)$/;
 
 export default {
 	async fetch(req) {
-		const { pathname } = new URL(req.url);
-
-		if (pathname.startsWith("/data/")) return serveData(req, pathname.slice("/data/".length));
-
-		if (pathname === "/api/status") return json(await env.SNAPSHOTS.get("status"), 30);
-		if (pathname === "/api/tide") {
-			const text = await env.SNAPSHOTS.get("tide");
-			return text === null ? json(null) : new Response(text, { headers: { "content-type": "text/plain; charset=utf-8" } });
-		}
-
-		const m = /^\/api\/layers\/(\w+)$/.exec(pathname);
-		if (m && (LAYERS as readonly string[]).includes(m[1])) return json(await env.SNAPSHOTS.get(`layer:${m[1]}`));
-
-		return new Response("not found", { status: 404 });
+		const m = SERVED.exec(new URL(req.url).pathname);
+		const obj = m && !m[1].includes("..") ? await env.DATA.get(m[1]) : null;
+		if (!obj) return new Response("not found", { status: 404, headers: { "access-control-allow-origin": "*" } });
+		const headers = new Headers({ "access-control-allow-origin": "*", etag: obj.httpEtag });
+		obj.writeHttpMetadata(headers);
+		return new Response(obj.body, { headers });
 	},
 
-	async scheduled() {
-		const status = await refresh();
+	async scheduled(controller) {
+		// Runs every 5 min; a source is due when the (5-min rounded) minute is a multiple of its interval.
+		const minute = Math.round(new Date(controller.scheduledTime).getUTCMinutes() / 5) * 5;
+		// The tide table is a daily forecast: hourly is plenty.
+		const status = await refresh(LAYERS.filter((l) => minute % (SOURCES[l].every ?? 5) === 0), minute % 60 === 0);
 		const failed = Object.entries(status).filter(([, s]) => !s?.ok);
 		if (failed.length) console.warn("refresh failures", JSON.stringify(failed));
 	},

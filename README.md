@@ -1,8 +1,8 @@
 # thai-water-way
 
-Bangkok water map and flood simulation. One Cloudflare Worker: static page, `/api/*`, and a
-5-minute cron that pulls live sensor data. The model runs in the browser. Free, non-commercial.
-Built data lives in the sibling repo `thai-water-way-data` (contents and licences in its README).
+Bangkok water map and flood simulation. Static app, model runs in the browser; a Worker cron pulls
+live data into R2 every 5 min; all data is public on the data domain. Free, non-commercial. Built
+data lives in the sibling repo `thai-water-way-data` (contents and licences in its README).
 
 ## Run
 
@@ -11,24 +11,41 @@ bun install
 bun run vite dev --port 5199     # Vite on Node: the CF Vite plugin refuses the Bun runtime
 ```
 
-`public/data` and `data` are symlinks into `../thai-water-way-data`. Local cron:
+Dev reads built data from `public/data` (symlink to `../thai-water-way-data`) and live data from
+the local Worker's R2. Local cron:
 `curl -X POST "localhost:5199/cdn-cgi/local/explorer/api/local/scheduled?worker=thai-water-way" -H 'content-type: application/json' -d '{"cron":"*/5 * * * *"}'`
 
-## Data and deploy
+## Deploy
 
-- Rebuild data: `bun run data:rebuild` (network → infra → terrain → banks → boundary → levels →
-  ponding → hotspots → `BUILD.json`). Rebuild all after `data:network` (node ids change).
-- Deploy app: Workers Builds, build `bun run build`, deploy `bunx cf deploy --prebuilt`, `NODE_VERSION=24`.
-- Publish data: commit the data repo, then `bun run data:publish` (R2, versioned by data commit).
+Cost model: app = Workers static assets (free); data reads = R2 behind Cloudflare cache (free
+egress); Worker = cron only (~0.1–0.2 s CPU a run, needs Workers Paid); builds run on the laptop.
 
-Public government sources (BMA, HII/ThaiWater, RID, Traffy, …): use them moderately. Build
-scripts download history once and cache it (`scripts/lib/data.mjs`: at most `POLITE` = 2 requests
-in flight per server, long backoff on 403/429, a window is cached only once `settled`, 6 h after it
-ends). The Worker makes one request per source per 5-minute refresh. New sources follow the same
-rules.
+- App: Workers Builds, build `bun run build`, deploy `bunx cf deploy --prebuilt`, `NODE_VERSION=24`.
+- Data: `bun run data:rebuild` (rebuild all after `data:network`: node ids change), commit the data
+  repo, `bun run data:publish`.
+- Archive: `bun run data:compact` any time (R2 token in `.env`, see `.env.example`).
+- Data domain, once: set `DATA_ORIGIN` (`shared/data-layout.ts`) and add it as the bucket's custom
+  domain; bucket CORS `GET, HEAD` from `*`; Cache Rules: `/v/*`, `/archive/*` edge TTL 1 year,
+  `/live/*`, `/current.json` TTL 60 s (`.json` isn't cached by default); Smart Tiered Cache on.
 
-Code map: `worker/` live data and API · `src/main.ts` map · `src/sim/` canal model, ponding,
-UI · `scripts/` data pipeline · `shared/types.ts` data file shapes.
+Government sources: use moderately. Scripts cache history once settled (`scripts/lib/data.mjs`,
+`POLITE` = 2 in flight, long backoff on 403/429); the Worker fetches each source only as often as
+it changes (`every` in `worker/index.ts`). New sources follow the same rules.
+
+## Public data
+
+No key, CORS open, base `DATA_ORIGIN`. Layout `shared/data-layout.ts`, shapes `shared/types.ts`.
+Stays available when a source site is down. Non-commercial use with attribution.
+
+| Path | What |
+|---|---|
+| `live/<layer>.json` | latest GeoJSON per layer: `flood`, `pump`, `smallpump`, `flow`, `level`, `rain`, `river`, `reports` (5–15 min) |
+| `live/status.json`, `live/tide.txt` | refresh status per layer; HII tide forecast (hourly) |
+| `archive/raw/<layer>/<day>/<HHmm>.json` | every refresh of today, Bangkok time |
+| `archive/<layer>/<YYYY>/<day>.ndjson.gz`, `archive/index.json` | past days, one line per distinct reading (`seen_at`, `id`, `lon`, `lat`, …) |
+| `current.json`, `v/<version>/<file>` | built data of the live version |
+
+Code: `worker/` refresh · `src/main.ts` map · `src/sim/` model, ponding, UI · `scripts/` pipeline.
 
 ## Methods and references
 
@@ -50,7 +67,7 @@ UI · `scripts/` data pipeline · `shared/types.ts` data file shapes.
 | BMA flood sensors, floodbangkok.bangkok.go.th | Road flood depth history |
 | BMA GIS, cpudgiapp.bangkok.go.th (Drainage, CPUD basemap) | Canal network, tunnels, pump stations, spot heights |
 | BMA open data, data.bangkok.go.th | Pump/gate capacities, tunnels, retention ponds, dikes |
-| HII ThaiWater, api-v3.thaiwater.net | River and canal levels nationwide, history; boundary gauges |
+| HII ThaiWater, api-v3.thaiwater.net | River and canal levels nationwide, history; boundary gauges; extra rain gauges (HII, TMD, DWR, RID) |
 | HII tide table, fews2.hii.or.th | Gulf tide forecast |
 | Traffy Fondue (BMA / NECTEC), publicapi.traffy.in.th | Citizen flood reports (location, time, status only) |
 | OpenStreetMap contributors (ODbL) | Samut Prakan canals, Chao Phraya line, pond locations |

@@ -7,6 +7,7 @@
 //    the road sensors and slowed when the physical model's canals are full.
 import type * as maplibregl from "maplibre-gl";
 import type { Infra, Scenario, Snapshot, Terrain } from "../../shared/types.ts";
+import { fetchBuilt } from "../data.ts";
 import { FloodShade, type Ground } from "../flood.ts";
 import { speedClass, type Edge } from "../flow.ts";
 import { addMovement, animate, popupOnClick } from "../mapkit.ts";
@@ -18,7 +19,7 @@ const fromFile = (id: string, label: string) => ({
 	id,
 	label,
 	load: async (): Promise<Scenario | null> => {
-		const r = await fetch(`/data/scenarios/${id}.json`);
+		const r = await fetchBuilt(`scenarios/${id}.json`);
 		return r.ok ? r.json() : null;
 	},
 });
@@ -185,7 +186,7 @@ export function setupSim(
 	let terrain: Terrain | null = null;
 	const terrainBox = root.querySelector<HTMLInputElement>("#k-terrain")!;
 	const terrainSrc = root.querySelector<HTMLSpanElement>("#terrain-src")!;
-	fetch("/data/terrain.json")
+	fetchBuilt("terrain.json")
 		.then((r) => (r.ok ? (r.json() as Promise<Terrain>) : null))
 		.then((t) => {
 			if (!t) return void (terrainSrc.textContent = "(none built: flat land)");
@@ -204,16 +205,16 @@ export function setupSim(
 		msg.textContent = "Loading…";
 		const scenario = await choice.load();
 		if (!scenario) return void (msg.textContent = "Scenario data not built yet.");
-		if (infra === undefined) infra = await fetch("/data/infra.json").then((r) => (r.ok ? r.json() : null));
-		const loadPond = (url: string) => fetch(url).then((r) => (r.ok ? (r.json() as Promise<PondingFile>) : null)).then((p) => (p?.builtFrom === networkBuild ? p : null));
-		if (pond === undefined) pond = await loadPond("/data/ponding.json");
-		if (hotspots === undefined) hotspots = await loadPond("/data/hotspots.json");
+		if (infra === undefined) infra = await fetchBuilt("infra.json").then((r) => (r.ok ? r.json() : null));
+		const loadPond = (path: string) => fetchBuilt(path).then((r) => (r.ok ? (r.json() as Promise<PondingFile>) : null)).then((p) => (p?.builtFrom === networkBuild ? p : null));
+		if (pond === undefined) pond = await loadPond("ponding.json");
+		if (hotspots === undefined) hotspots = await loadPond("hotspots.json");
 		if (nodeBanks === undefined)
-			nodeBanks = await fetch("/data/banks.json")
+			nodeBanks = await fetchBuilt("banks.json")
 				.then((r) => (r.ok ? (r.json() as Promise<{ builtFrom: string; bank: (number | null)[] }>) : null))
 				.then((b) => (b && b.builtFrom === networkBuild ? b.bank : null));
 		if (boundaryNodes === undefined)
-			boundaryNodes = await fetch("/data/boundary.json")
+			boundaryNodes = await fetchBuilt("boundary.json")
 				.then((r) => (r.ok ? (r.json() as Promise<{ builtFrom: string; nodes: { node: number; width_m: number; gauge: string }[] }>) : null))
 				.then((b) => (b && b.builtFrom === networkBuild ? b.nodes : null));
 		msg.textContent = "Running…";

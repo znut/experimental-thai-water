@@ -1,6 +1,7 @@
 import * as maplibregl from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { LAYERS, type Infra, type LayerName, type SensorSnap, type Snapshot, type Status, type Terrain } from "../shared/types.ts";
+import { fetchBuilt, fetchLive } from "./data.ts";
 import { drainageTree } from "./drainage.ts";
 import { FLOOD_LEGEND, FloodShade, loadGround, type Ground } from "./flood.ts";
 import { junctions, measuredFlowLines, type Edge } from "./flow.ts";
@@ -59,9 +60,9 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 
-const getJson = async <T>(url: string): Promise<T | null> => {
-	const res = await fetch(url);
-	return res.ok ? res.json() : null;
+const getJson = async <T>(req: Promise<Response>): Promise<T | null> => {
+	const res = await req.catch(() => null);
+	return res?.ok ? res.json() : null;
 };
 const vis = (on: boolean) => (on ? "visible" : "none") as "visible" | "none";
 
@@ -318,7 +319,7 @@ function renderToggles() {
 
 async function renderStatus() {
 	const el = document.getElementById("status")!;
-	const status = await getJson<Status>("/api/status");
+	const status = await getJson<Status>(fetchLive("status.json"));
 	if (!status) return void (el.textContent = "No data yet: waiting for the first refresh.");
 	const times = Object.values(status).map((s) => s?.fetchedAt).filter(Boolean).sort();
 	const failed = Object.entries(status).filter(([, s]) => !s?.ok).map(([k]) => k);
@@ -327,12 +328,12 @@ async function renderStatus() {
 
 async function init() {
 	const [network, sensors, infra, terrain, tide, ...snaps] = await Promise.all([
-		getJson<GeoJSON.FeatureCollection<GeoJSON.LineString> & { build?: string }>("/data/network.geojson"),
-		getJson<Record<string, SensorSnap>>("/data/sensors.json"),
-		getJson<Infra>("/data/infra.json"),
-		getJson<Terrain>("/data/terrain.json"),
-		fetch("/api/tide").then((r) => (r.ok ? r.text() : null)),
-		...LAYERS.map((l) => getJson<Snapshot>(`/api/layers/${l}`)),
+		getJson<GeoJSON.FeatureCollection<GeoJSON.LineString> & { build?: string }>(fetchBuilt("network.geojson")),
+		getJson<Record<string, SensorSnap>>(fetchBuilt("sensors.json")),
+		getJson<Infra>(fetchBuilt("infra.json")),
+		getJson<Terrain>(fetchBuilt("terrain.json")),
+		fetchLive("tide.txt").then((r) => (r.ok ? r.text() : null), () => null),
+		...LAYERS.map((l) => getJson<Snapshot>(fetchLive(`${l}.json`))),
 	]);
 	const snap = (l: LayerName) => snaps[LAYERS.indexOf(l)] ?? null;
 	const edges: Edge[] = (network?.features ?? []).map((f) => ({ ...(f.properties as Omit<Edge, "coords">), coords: f.geometry.coordinates as [number, number][] }));

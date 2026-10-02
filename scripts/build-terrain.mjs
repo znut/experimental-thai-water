@@ -276,7 +276,7 @@ console.log(`pixels used ${used} (${((used * pixelM2) / 1e6).toFixed(0)} km²); 
 console.log(`node median ground m: p5 ${pct(0.05)} p25 ${pct(0.25)} p50 ${pct(0.5)} p75 ${pct(0.75)} p95 ${pct(0.95)}`);
 
 try {
-	const level = await (await fetch("http://localhost:5199/api/layers/level")).json();
+	const level = await (await fetch("http://localhost:5199/live/level.json")).json();
 	const diffs = [];
 	for (const f of level.features) {
 		const bank = f.properties.bank_m;

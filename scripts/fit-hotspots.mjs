@@ -94,7 +94,7 @@ for (const id of VAL_IDS) {
 const edges = network.features.map((f) => ({ ...f.properties, coords: f.geometry.coordinates }));
 let banks = [];
 try {
-	const level = await (await fetch("http://localhost:5199/api/layers/level")).json();
+	const level = await (await fetch("http://localhost:5199/live/level.json")).json();
 	banks = level.features.filter((f) => typeof f.properties.bank_m === "number").map((f) => ({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], bank: f.properties.bank_m }));
 } catch {
 	console.warn("dev server not reachable: default banks for stations without banks.json");

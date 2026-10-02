@@ -2,8 +2,9 @@ import { bindings, defineConfig, triggers } from "cf/config";
 import * as entrypoint from "./worker/index.ts" with { type: "cf-worker" };
 import { DATA_BUCKET } from "./shared/deploy.ts";
 
-// Built data files (network, terrain, scenarios, …) live in the thai-water-way-data repo and are
-// served from R2, not bundled; see scripts/publish-data.mjs.
+// The Worker only refreshes live data (cron) into R2. The app is static assets (free, no Worker
+// run); data is read from the R2 bucket on its custom domain (shared/data-layout.ts DATA_ORIGIN).
+// Built data comes from the thai-water-way-data repo via scripts/publish-data.mjs.
 
 export default defineConfig({
 	worker: {
@@ -12,15 +13,12 @@ export default defineConfig({
 		entrypoint,
 		assets: {
 			notFoundHandling: "single-page-application",
-			runWorkerFirst: ["/api/*", "/data/*"],
+			// Same R2 keys as the data domain, for local dev; production clients use DATA_ORIGIN.
+			runWorkerFirst: ["/current.json", "/live/*", "/archive/*", "/v/*"],
 		},
 		env: {
-			// Latest normalized snapshot per layer, written by the cron below.
-			SNAPSHOTS: bindings.kv(),
-			// Published data versions: "<version>/<path>" plus a "current" pointer object.
+			// All public data: built versions, live snapshots, archive (key layout in shared/data-layout.ts).
 			DATA: bindings.r2({ name: DATA_BUCKET }),
-			// Static assets; /data/* falls back here (local dev, or before the first publish).
-			ASSETS: bindings.assets(),
 		},
 		// BMA sensors update every 5 minutes.
 		triggers: [triggers.scheduled({ schedule: "*/5 * * * *" })],

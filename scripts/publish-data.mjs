@@ -1,20 +1,21 @@
 // Publishes the data repo (public/data -> ../thai-water-way-data/public) to R2 as a new version,
-// then points "current" at it. The version is the data repo's commit, so what is live always
-// matches a commit. Files go to "<version>/<path>"; the Worker serves /data/<path> from the
-// current version, so a half-finished upload is never visible. Old versions stay in R2 (roll
-// back by rewriting "current").
+// then points current.json at it. The version is the data repo's commit, so what is live always
+// matches a commit. Files go to "v/<version>/<path>" (immutable, cached for a year on the data
+// domain); clients read current.json first, so a half-finished upload is never visible. Old
+// versions stay in R2 (roll back by rewriting current.json).
 //
 // Run: bun scripts/publish-data.mjs [--dry-run] [--allow-dirty]
 //   --dry-run      list what would be uploaded
 //   --allow-dirty  publish uncommitted data (version gets a "-dirty" suffix)
 // Needs `cf` logged in to your Cloudflare account (bunx cf auth login). Local dev needs no
-// publish: the Worker falls back to the symlinked files when R2 has nothing.
+// publish: the dev client reads the symlinked files directly.
 import { realpathSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import { DATA_BUCKET } from "../shared/deploy.ts";
+import { KEY } from "../shared/data-layout.ts";
 
 const DRY = process.argv.includes("--dry-run");
 const ALLOW_DIRTY = process.argv.includes("--allow-dirty");
@@ -63,7 +64,7 @@ let bytes = 0;
 for (const f of files) bytes += (await stat(new URL(f, root))).size;
 console.log(`version ${version}: ${files.length} files, ${(bytes / 1e6).toFixed(1)} MB → r2://${DATA_BUCKET}`);
 if (DRY) {
-	for (const f of files) console.log(`  ${version}/${f}`);
+	for (const f of files) console.log(`  ${KEY.built(version, f)}`);
 	process.exit(0);
 }
 
@@ -73,11 +74,12 @@ await Promise.all(
 	Array.from({ length: 4 }, async () => {
 		for (let f; (f = queue.shift()); ) {
 			const ext = f.slice(f.lastIndexOf("."));
-			await cf(["r2", "objects", "put", `${version}/${f}`, "--bucket-name", DATA_BUCKET, "--file", new URL(f, root).pathname, "--content-type", TYPES[ext] ?? "application/octet-stream"]);
+			await cf(["r2", "objects", "put", KEY.built(version, f), "--bucket-name", DATA_BUCKET, "--file", new URL(f, root).pathname, "--content-type", TYPES[ext] ?? "application/octet-stream"]);
 			console.log(`  ${++done}/${files.length} ${f}`);
 		}
 	}),
 );
 // Switch over only after every file is in place.
-await cf(["r2", "objects", "put", "current", "--bucket-name", DATA_BUCKET, "--body", version, "--content-type", "text/plain"]);
-console.log(`current → ${version}`);
+const current = { version, published_at: new Date().toISOString(), network_build: net.build ?? null, files };
+await cf(["r2", "objects", "put", KEY.current, "--bucket-name", DATA_BUCKET, "--body", JSON.stringify(current), "--content-type", "application/json"]);
+console.log(`${KEY.current} → ${version}`);

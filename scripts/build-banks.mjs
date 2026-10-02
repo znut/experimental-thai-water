@@ -11,14 +11,14 @@
 // Run: bun scripts/build-banks.mjs   (needs the live API for current station metadata)
 import { readFile, writeFile } from "node:fs/promises";
 
-const API = process.env.API ?? "http://localhost:5199/api/layers";
+const API = process.env.API ?? "http://localhost:5199/live";
 const SAME_CANAL_M = 4000;
 const MAX_M = 6000;
 
 const dataDir = new URL("../public/data/", import.meta.url);
 const net = JSON.parse(await readFile(new URL("network.geojson", dataDir), "utf8"));
 const sensors = JSON.parse(await readFile(new URL("sensors.json", dataDir), "utf8"));
-const [level, river] = await Promise.all(["level", "river"].map(async (l) => (await fetch(`${API}/${l}`)).json()));
+const [level, river] = await Promise.all(["level", "river"].map(async (l) => (await fetch(`${API}/${l}.json`)).json()));
 
 const LAT0 = 13.75, LON0 = 100.55;
 const KX = 111_320 * Math.cos((LAT0 * Math.PI) / 180), KY = 110_540;
