@@ -16,6 +16,13 @@ export default defineConfig({
 			// Same R2 keys as the data domain, for local dev; production clients use DATA_ORIGIN.
 			runWorkerFirst: ["/current.json", "/live/*", "/archive/*", "/v/*"],
 		},
+		// Matches the dashboard (deploys run with --strict and abort on any difference).
+		domains: ["water.experiment.tripsters.me"],
+		workersDev: false,
+		previewUrls: false,
+		// Guard rail per invocation. The cron's share (Traffy, ~35 MB of JSON per 15 min) is the
+		// heaviest run: if live/status.json shows reports failing on CPU, raise this.
+		limits: { cpuMs: 50 },
 		env: {
 			// All public data: built versions, live snapshots, archive (key layout in shared/data-layout.ts).
 			DATA: bindings.r2({ name: DATA_BUCKET }),
