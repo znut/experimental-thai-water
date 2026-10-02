@@ -20,7 +20,9 @@ the local Worker's R2. Local cron:
 Cost model: app = Workers static assets (free); data reads = R2 behind Cloudflare cache (free
 egress); Worker = cron only (~0.1–0.2 s CPU a run, needs Workers Paid); builds run on the laptop.
 
-- App: Workers Builds, build `bun run build`, deploy `bunx cf deploy --prebuilt`, `NODE_VERSION=24`.
+- App: Workers Builds, build `bun run build`, deploy `bunx cf deploy --prebuilt`; build variables
+  `BUN_VERSION=1.4.0` (bun.lock v2; the image default 1.2 is older) and `NODE_VERSION=24` (cf and
+  Vite run on Node).
 - Data: `bun run data:rebuild` (rebuild all after `data:network`: node ids change), commit the data
   repo, `bun run data:publish`.
 - Archive: `bun run data:compact` any time (R2 token in `.env`, see `.env.example`).

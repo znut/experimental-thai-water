@@ -20,6 +20,15 @@ export default defineConfig({
 			// All public data: built versions, live snapshots, archive (key layout in shared/data-layout.ts).
 			DATA: bindings.r2({ name: DATA_BUCKET }),
 		},
+		// Matches the dashboard: Workers Logs (incl. the cron's console.warn) and traces kept.
+		observability: {
+			enabled: false,
+			headSamplingRate: 1,
+			redactQueryString: false,
+			logs: { enabled: true, headSamplingRate: 1, invocationLogs: true, persist: true },
+			traces: { enabled: true, headSamplingRate: 1, persist: true },
+			issues: { enabled: false },
+		},
 		// BMA sensors update every 5 minutes.
 		triggers: [triggers.scheduled({ schedule: "*/5 * * * *" })],
 	},
