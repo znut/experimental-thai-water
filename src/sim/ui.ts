@@ -29,6 +29,37 @@ const SCENARIOS: { id: string; label: string; load: () => Promise<Scenario | nul
 	fromFile("storm-2025-05", "Storm, 10–12 May 2025 (recorded)"),
 	fromFile("storm-2025-11", "Storm, 2–4 Nov 2025 (recorded)"),
 	{
+		id: "forecast",
+		label: "Forecast, next 3 days (Open-Meteo; storm cells smoothed, try Rain ×)",
+		load: async () => {
+			// Hourly forecast rain on a 3×3 grid over the model area. Global models spread a storm
+			// cell over ~10 km, so peaks come out far below what a gauge under the cell records:
+			// read this as a lower bound and use the Rain × knob for a heavier storm.
+			const lats = [13.55, 13.78, 14.0], lons = [100.35, 100.6, 100.85];
+			const pts = lats.flatMap((lat) => lons.map((lon) => ({ lat, lon })));
+			const q = new URLSearchParams({
+				latitude: pts.map((p) => p.lat).join(","),
+				longitude: pts.map((p) => p.lon).join(","),
+				hourly: "precipitation",
+				forecast_hours: "72",
+				timezone: "Asia/Bangkok",
+			});
+			const r = await fetch(`https://api.open-meteo.com/v1/forecast?${q}`).catch(() => null);
+			if (!r?.ok) return null;
+			const locs: { hourly: { time: string[]; precipitation: (number | null)[] } }[] = await r.json();
+			const time = locs[0].hourly.time; // "2026-10-05T12:00", Bangkok
+			return {
+				id: "forecast",
+				title: `Forecast from ${time[0].replace("T", " ")} BKK`,
+				start: `${time[0]}:00+07:00`,
+				step_min: 60,
+				steps: time.length,
+				rain: locs.map((l, i) => ({ code: `om-${i}`, ...pts[i], mm: l.hourly.precipitation })),
+				sources: ["Open-Meteo forecast API (open-meteo.com), best-match weather models"],
+			};
+		},
+	},
+	{
 		id: "design-133",
 		label: "Design check: 133 mm in 24 h, uniform",
 		load: async () => {

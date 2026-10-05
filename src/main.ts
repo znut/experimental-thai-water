@@ -22,6 +22,7 @@ const GROUPS: { title: string; items: Record<string, Toggle> }[] = [
 	{
 		title: "Now",
 		items: {
+			radar: { label: 'Rain radar, last 2 h (RainViewer)<span id="radar-time"></span>', color: "#2b8cbe", on: true, ids: [] },
 			shade: { label: "Estimated flooded area", color: "#e6550d", on: true, ids: ["flood-shade"] },
 			flood: { label: "Flooded road sensors", color: "#d62728", on: true, ids: ["flood"] },
 			pump: { label: "Pump stations (% running)", color: "#238b45", on: true, ids: ["pump", "pump-label"] },
@@ -317,6 +318,32 @@ function renderToggles() {
 		`<span>Flood depth:</span>` + FLOOD_LEGEND.map((l) => `<i style="background:${l.css}"></i>${l.from_cm}+`).join("") + " cm";
 }
 
+// Rain radar (RainViewer's global composite): the last ~2 h of frames, looped so storm cells
+// show which way they move. Free tiles stop at zoom 7, so it's coarse up close.
+async function addRadar() {
+	const j = await getJson<{ host: string; radar: { past: { time: number; path: string }[] } }>(fetch("https://api.rainviewer.com/public/weather-maps.json"));
+	const frames = j?.radar.past ?? [];
+	if (!frames.length) return;
+	const t = item("radar");
+	const below = map.getStyle().layers.find((l) => l.type === "symbol")?.id; // under place names and our layers
+	frames.forEach((f, i) => {
+		const id = `radar-${i}`;
+		map.addSource(id, { type: "raster", tiles: [`${j!.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`], tileSize: 256, maxzoom: 7, attribution: "Radar © RainViewer" });
+		map.addLayer({ id, type: "raster", source: id, layout: { visibility: vis(t.on) }, paint: { "raster-opacity": 0, "raster-fade-duration": 0 } }, below);
+		t.ids.push(id);
+	});
+	const time = document.getElementById("radar-time")!;
+	let k = 0;
+	const tick = () => {
+		frames.forEach((_, i) => map.setPaintProperty(`radar-${i}`, "raster-opacity", i === k ? 0.6 : 0));
+		time.textContent = `: ${bkkTime(new Date(frames[k].time * 1000).toISOString())}`;
+		const last = k === frames.length - 1;
+		k = (k + 1) % frames.length;
+		setTimeout(tick, last ? 2500 : 500); // hold on the latest frame
+	};
+	tick();
+}
+
 async function renderStatus() {
 	const el = document.getElementById("status")!;
 	const status = await getJson<Status>(fetchLive("status.json"));
@@ -336,6 +363,7 @@ async function renderStatus() {
 }
 
 async function init() {
+	void addRadar();
 	const [network, sensors, infra, terrain, tide, ...snaps] = await Promise.all([
 		getJson<GeoJSON.FeatureCollection<GeoJSON.LineString> & { build?: string }>(fetchBuilt("network.geojson")),
 		getJson<Record<string, SensorSnap>>(fetchBuilt("sensors.json")),
