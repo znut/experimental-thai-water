@@ -32,8 +32,6 @@ export default defineConfig({
 			// Bearer key for POST /api/ingest (the laptop mirror). Set in the dashboard; the laptop
 			// reads the same key from ~/.config/thai-water-way/ingest-key. Dev: .dev.vars.
 			INGEST_KEY: bindings.secret(),
-			// GISTDA disaster API (satellite flood extent tiles, /tiles/gistda/…). Dashboard; dev: .dev.vars.
-			GISTDA_KEY: bindings.secret(),
 		},
 		// Matches the dashboard: Workers Logs (incl. the cron's console.warn) and traces kept.
 		observability: {

@@ -33,7 +33,8 @@ egress); Worker = cron only (~0.1–0.2 s CPU a run, needs Workers Paid); builds
   tools) for place + depth, and places reports with `data/gazetteer.json` (`bun run data:gazetteer`,
   OSM; `--cached` builds from snapshots when Overpass is slow).
 - Satellite flood extent: `/tiles/gistda/<1day|3days|7days|30days>/{z}/{x}/{y}` proxies GISTDA's
-  tiles (Thailand only, edge-cached 1 h) with the `GISTDA_KEY` Worker secret (dev: `.dev.vars`).
+  tiles (Thailand only, edge-cached 1 h) with the optional `GISTDA_KEY` Worker secret (dashboard;
+  without it the layer is left out).
 - Archive: `bun run data:compact` any time.
 - Laptop scripts never hold R2 credentials: mirror, publish and compact go through the Worker's
   API (`worker/api.ts`, each route limited to the keys its script writes). Key: Worker secret

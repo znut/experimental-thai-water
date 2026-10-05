@@ -348,6 +348,7 @@ function renderToggles() {
 		box.append(h);
 		for (const [key, t] of Object.entries(g.items)) {
 			const el = document.createElement("label");
+			el.id = `${key}-toggle`;
 			el.innerHTML = `<input type="checkbox" ${t.on ? "checked" : ""}><span class="swatch" style="background:${t.color}"></span><span>${t.label}</span>`;
 			el.querySelector("input")!.addEventListener("change", (e) => {
 				const on = (e.target as HTMLInputElement).checked;
@@ -413,15 +414,18 @@ async function renderStatus() {
 }
 
 // GISTDA's satellite flood extent (radar sees through cloud; little inside dense city blocks).
-// Tiles come through our Worker, which holds the key (worker/index.ts).
-function addSatellite() {
-	map.addSource("satellite", { type: "raster", tiles: [`${location.origin}/tiles/gistda/7days/{z}/{x}/{y}`], tileSize: 256, maxzoom: 16, attribution: "Flood extent © GISTDA" });
+// Tiles come through our Worker, which holds the key (worker/index.ts); no key there, no layer.
+async function addSatellite() {
+	const tiles = `${location.origin}/tiles/gistda/7days/{z}/{x}/{y}`;
+	const probe = await fetch(tiles.replace("{z}/{x}/{y}", "5/24/14")).catch(() => null); // the tile over central Thailand
+	if (!probe?.ok) return void document.getElementById("satellite-toggle")?.remove();
+	map.addSource("satellite", { type: "raster", tiles: [tiles], tileSize: 256, maxzoom: 16, attribution: "Flood extent © GISTDA" });
 	map.addLayer({ id: "satellite", type: "raster", source: "satellite", layout: { visibility: vis(item("satellite").on) }, paint: { "raster-opacity": 0.7 } }, map.getStyle().layers.find((l) => l.type === "symbol")?.id);
 }
 
 async function init() {
 	void addRadar();
-	addSatellite();
+	void addSatellite();
 	const [network, sensors, infra, terrain, ...snaps] = await Promise.all([
 		getJson<GeoJSON.FeatureCollection<GeoJSON.LineString> & { build?: string }>(fetchBuilt("network.geojson")),
 		getJson<Record<string, SensorSnap>>(fetchBuilt("sensors.json")),
