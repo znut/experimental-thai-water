@@ -27,10 +27,12 @@ egress); Worker = cron only (~0.1–0.2 s CPU a run, needs Workers Paid); builds
 - Data: `bun run data:rebuild` (rebuild all after `data:network`: node ids change), commit the data
   repo, `bun run data:publish`.
 - Live data the Worker can't fetch (BMA, ThaiWater: `RUNS_ON` in `worker/sources.ts`):
-  `caffeinate -i bun run mirror` on the laptop fetches them and posts to `POST /api/ingest`; only
-  the Worker writes R2. Key: Worker secret `INGEST_KEY` (dashboard) = `~/.config/thai-water-way/ingest-key`.
-  Dev: `INGEST_KEY=…` in `.dev.vars`, then `INGEST_URL=http://localhost:5199/api/ingest INGEST_KEY=… bun run mirror --once`.
-- Archive: `bun run data:compact` any time (R2 token in `.env`, see `.env.example`).
+  `caffeinate -i bun run mirror` on the laptop fetches them and posts them to the Worker.
+- Archive: `bun run data:compact` any time.
+- Laptop scripts never hold R2 credentials: mirror, publish and compact go through the Worker's
+  API (`worker/api.ts`, each route limited to the keys its script writes). Key: Worker secret
+  `INGEST_KEY` (dashboard) = `~/.config/thai-water-way/ingest-key`. Dev: `INGEST_KEY=…` in
+  `.dev.vars`, then `API_ORIGIN=http://localhost:5199 INGEST_KEY=… bun run mirror --once`.
 - Data domain, once: set `DATA_ORIGIN` (`shared/data-layout.ts`) and add it as the bucket's custom
   domain; bucket CORS `GET, HEAD` from `*`; Cache Rules: `/v/*`, `/archive/*` edge TTL 1 year,
   `/live/*`, `/current.json` TTL 60 s (`.json` isn't cached by default); Smart Tiered Cache on.

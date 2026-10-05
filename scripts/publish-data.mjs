@@ -7,15 +7,15 @@
 // Run: bun scripts/publish-data.mjs [--dry-run] [--allow-dirty]
 //   --dry-run      list what would be uploaded
 //   --allow-dirty  publish uncommitted data (version gets a "-dirty" suffix)
-// Needs `cf` logged in to your Cloudflare account (bunx cf auth login). Local dev needs no
+// Uploads go through the Worker's API (scripts/lib/api.mjs); a version's files are write-once, so
+// an interrupted publish just re-runs (files already there are skipped). Local dev needs no
 // publish: the dev client reads the symlinked files directly.
 import { realpathSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
-import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { DATA_BUCKET } from "../shared/deploy.ts";
 import { KEY } from "../shared/data-layout.ts";
+import { ORIGIN, put } from "./lib/api.mjs";
 
 const DRY = process.argv.includes("--dry-run");
 const ALLOW_DIRTY = process.argv.includes("--allow-dirty");
@@ -31,15 +31,6 @@ async function walk(dir, prefix = "") {
 		else out.push(`${prefix}${e.name}`);
 	}
 	return out;
-}
-
-function cf(args) {
-	return new Promise((resolve, reject) => {
-		const p = spawn("bunx", ["cf", ...args], { stdio: ["ignore", "pipe", "pipe"] });
-		let err = "";
-		p.stderr.on("data", (d) => (err += d));
-		p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`cf ${args.slice(0, 4).join(" ")} failed: ${err.trim().slice(-400)}`))));
-	});
 }
 
 const net = JSON.parse(await readFile(new URL("network.geojson", root), "utf8"));
@@ -62,7 +53,7 @@ console.log(`network build ${net.build}`);
 const files = await walk(root);
 let bytes = 0;
 for (const f of files) bytes += (await stat(new URL(f, root))).size;
-console.log(`version ${version}: ${files.length} files, ${(bytes / 1e6).toFixed(1)} MB → r2://${DATA_BUCKET}`);
+console.log(`version ${version}: ${files.length} files, ${(bytes / 1e6).toFixed(1)} MB → ${ORIGIN}`);
 if (DRY) {
 	for (const f of files) console.log(`  ${KEY.built(version, f)}`);
 	process.exit(0);
@@ -74,12 +65,12 @@ await Promise.all(
 	Array.from({ length: 4 }, async () => {
 		for (let f; (f = queue.shift()); ) {
 			const ext = f.slice(f.lastIndexOf("."));
-			await cf(["r2", "objects", "put", KEY.built(version, f), "--bucket-name", DATA_BUCKET, "--file", new URL(f, root).pathname, "--content-type", TYPES[ext] ?? "application/octet-stream"]);
-			console.log(`  ${++done}/${files.length} ${f}`);
+			const r = await put(KEY.built(version, f), await readFile(new URL(f, root)), TYPES[ext] ?? "application/octet-stream");
+			console.log(`  ${++done}/${files.length} ${f}${r ? "" : " (already there)"}`);
 		}
 	}),
 );
-// Switch over only after every file is in place.
+// Switch over only after every file is in place (the Worker checks again).
 const current = { version, published_at: new Date().toISOString(), network_build: net.build ?? null, files };
-await cf(["r2", "objects", "put", KEY.current, "--bucket-name", DATA_BUCKET, "--body", JSON.stringify(current), "--content-type", "application/json"]);
+await put(KEY.current, JSON.stringify(current), "application/json");
 console.log(`${KEY.current} → ${version}`);

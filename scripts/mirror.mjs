@@ -6,30 +6,15 @@
 //
 // Run: bun run mirror            (keep the Mac awake: caffeinate -i bun run mirror)
 //      bun run mirror --once     (one refresh of every laptop source, then exit)
-// Key: ~/.config/thai-water-way/ingest-key, same value as the Worker's INGEST_KEY secret.
-// Env: INGEST_URL to post elsewhere (dev: http://localhost:5199/api/ingest), INGEST_KEY to override the file.
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { APP_HOST } from "../shared/deploy.ts";
+// Key and target: scripts/lib/api.mjs.
 import { LAYERS } from "../shared/types.ts";
 import { RUNS_ON, collect, due } from "../worker/sources.ts";
-
-const KEY_FILE = join(homedir(), ".config", "thai-water-way", "ingest-key");
-const URL = process.env.INGEST_URL ?? `https://${APP_HOST}/api/ingest`;
-const key = process.env.INGEST_KEY ?? (await readFile(KEY_FILE, "utf8").catch(() => "")).trim();
-if (!key) throw new Error(`no ingest key: put it in ${KEY_FILE} (the Worker's INGEST_KEY secret)`);
+import { ORIGIN, api } from "./lib/api.mjs";
 
 async function refresh(layers, tide) {
 	const batch = await collect(layers, tide);
-	if (!Object.keys(batch.results).length) return batch.results;
-	const res = await fetch(URL, {
-		method: "POST",
-		headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-		body: JSON.stringify(batch),
-		signal: AbortSignal.timeout(60_000),
-	});
-	if (!res.ok) throw new Error(`ingest -> HTTP ${res.status}: ${await res.text()}`);
+	if (Object.keys(batch.results).length)
+		await api("/api/ingest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(batch) });
 	return batch.results;
 }
 
@@ -45,7 +30,7 @@ if (process.argv.includes("--once")) {
 	process.exit(0);
 }
 
-console.log(`mirroring ${LAYERS.filter((l) => RUNS_ON[l] === "laptop").join(", ")} every 5 min to ${URL}`);
+console.log(`mirroring ${LAYERS.filter((l) => RUNS_ON[l] === "laptop").join(", ")} every 5 min to ${ORIGIN}`);
 for (;;) {
 	const slot = Math.floor((Date.now() - OFFSET) / SLOT) * SLOT + SLOT; // next cron slot
 	await Bun.sleep(slot + OFFSET - Date.now());
