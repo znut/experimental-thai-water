@@ -304,7 +304,7 @@ function renderToggles() {
 		box.append(h);
 		for (const [key, t] of Object.entries(g.items)) {
 			const el = document.createElement("label");
-			el.innerHTML = `<input type="checkbox" ${t.on ? "checked" : ""}><span class="swatch" style="background:${t.color}"></span>${t.label}`;
+			el.innerHTML = `<input type="checkbox" ${t.on ? "checked" : ""}><span class="swatch" style="background:${t.color}"></span><span>${t.label}</span>`;
 			el.querySelector("input")!.addEventListener("change", (e) => {
 				const on = (e.target as HTMLInputElement).checked;
 				t.on = on;
@@ -349,7 +349,13 @@ async function renderStatus() {
 	const status = await getJson<Status>(fetchLive("status.json"));
 	if (!status) return void (el.textContent = "No data yet: waiting for the first refresh.");
 	const times = Object.values(status).map((s) => s?.fetchedAt).filter(Boolean).sort();
-	const failed = Object.entries(status).filter(([, s]) => !s?.ok).map(([k]) => k);
+	// Name the source's answer: a 404 is the source site down or moved, 403/429 is it refusing us.
+	const failed = Object.entries(status)
+		.filter(([, s]) => !s?.ok)
+		.map(([k, s]) => {
+			const code = /HTTP (\d{3})/.exec(s?.error ?? "")?.[1];
+			return code === "404" ? `${k} (source page missing)` : code === "403" || code === "429" ? `${k} (source refusing, ${code})` : k;
+		});
 	// A runner that stops (laptop asleep, run killed) leaves no failure behind, only an old time.
 	// Name those layers so a days-old snapshot isn't read as current.
 	const stale = Object.entries(status)
@@ -357,7 +363,7 @@ async function renderStatus() {
 		.map(([k, s]) => `${k} (${bkkTime(s!.fetchedAt)})`);
 	el.textContent =
 		`Updated ${times.length ? bkkTime(times.at(-1)) : "never"}` +
-		(failed.length ? ` · failing: ${failed.join(", ")}` : "") +
+		(failed.length ? ` · no update: ${failed.join(", ")}` : "") +
 		(stale.length ? ` · not updating: ${stale.join(", ")}` : "");
 	el.classList.toggle("warn", failed.length + stale.length > 0);
 }
