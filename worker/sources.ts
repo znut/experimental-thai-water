@@ -1,5 +1,5 @@
-// Live sources and one refresh, shared by the Worker cron and the laptop mirror
-// (scripts/mirror.mjs): both write identical files to R2 (layout in shared/data-layout.ts).
+// Live sources, shared by the Worker cron and the laptop mirror (scripts/mirror.mjs): both fetch
+// with collect(); only the Worker writes R2, with save() (layout in shared/data-layout.ts).
 // No Worker-only imports here, so Bun can run it too.
 import { KEY, bkkParts } from "../shared/data-layout.ts";
 import { LAYERS, type LayerName, type PointFeature, type Props, type Snapshot, type Status } from "../shared/types.ts";
@@ -80,6 +80,12 @@ function msDate(v: unknown): string | null {
 	return m ? new Date(Number(m[1])).toISOString() : null;
 }
 
+// Since Oct 2026 also "26/09/2569 13:45": Bangkok time, Buddhist year (2569 = 2026).
+function thaiDate(v: unknown): string | null {
+	const m = typeof v === "string" && /^(\d\d)\/(\d\d)\/(\d{4}) (\d\d):(\d\d)$/.exec(v);
+	return m ? new Date(`${Number(m[3]) - 543}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:00+07:00`).toISOString() : null;
+}
+
 function num(v: unknown): number | null {
 	if (v === null || v === undefined || v === "") return null;
 	const n = Number(v);
@@ -103,16 +109,19 @@ export const SOURCES: Record<LayerName, { source: string; every?: number; load: 
 		source: "BMA DDS road flood sensors",
 		load: async () => {
 			const j = await getJson(`${BMA}/Flood/PageMap/GetData?id=0`);
-			return (j.dtTbl as Row[]).map((r) =>
-				point(r.latitude, r.longitude, {
+			// Since Oct 2026 dtTbl (status) has no coordinates: they're in floodTbl, by flood_code.
+			const where = new Map<string, Row>((j.floodTbl ?? []).map((r: Row) => [r.flood_code, r]));
+			return (j.dtTbl as Row[]).map((r) => {
+				const g = where.get(r.flood_code) ?? r;
+				return point(g.latitude, g.longitude, {
 					id: r.flood_code,
-					name: r.flood_name_en || r.flood_name,
+					name: r.flood_name_en || r.shortname_en || g.flood_name_en || r.flood_name || r.shortname,
 					depth_cm: num(r.flood),
-					max_cm: num(r.flood_max),
+					max_cm: num(r.flood_max ?? g.flood_max),
 					status: r.chkStatustxt_en ?? null,
-					time: msDate(r.site_timestamp),
-				}),
-			);
+					time: msDate(r.site_timestamp) ?? thaiDate(r.site_timestatmpTH ?? g.site_timestatmpTH),
+				});
+			});
 		},
 	},
 	pump: {
@@ -295,18 +304,19 @@ export const SOURCES: Record<LayerName, { source: string; every?: number; load: 
 	},
 };
 
-// Which runner refreshes each source; a file is only ever written by one of them. BMA's site
-// (behind Cloudflare) answers Workers with 403 and ThaiWater rate-limits Cloudflare's shared
-// addresses (429), so those run from the laptop. "tide" is the HII tide table.
+// Which runner fetches each source; a file only ever comes from one of them. Both sites are
+// behind Cloudflare and refuse Workers (retested 5 Oct 2026): BMA with a bot challenge (403,
+// cf-mitigated=challenge), ThaiWater with a usage limit (429). Those are fetched on the laptop and
+// posted to the Worker. "tide" is the HII tide table.
 export type Runner = "worker" | "laptop";
 export const RUNS_ON: Record<LayerName | "tide", Runner> = {
-	flood: "worker", // retest 2026-10-05: see the cron logs
-	pump: "worker", // retest 2026-10-05: see the cron logs
-	smallpump: "worker", // retest 2026-10-05: see the cron logs
-	flow: "worker", // retest 2026-10-05: see the cron logs
-	level: "worker", // retest 2026-10-05: see the cron logs
-	rain: "worker", // retest 2026-10-05: see the cron logs
-	river: "worker", // retest 2026-10-05: see the cron logs
+	flood: "laptop",
+	pump: "laptop",
+	smallpump: "laptop",
+	flow: "laptop",
+	level: "laptop",
+	rain: "laptop",
+	river: "laptop",
 	reports: "worker",
 	tide: "worker",
 };
@@ -321,7 +331,8 @@ export function due(ms: number, runner: Runner): { layers: LayerName[]; tide: bo
 	};
 }
 
-// Where a refresh writes: the R2 binding in the Worker, R2's S3 API on the laptop.
+// R2 as the Worker sees it (the binding). Only the Worker writes R2: the laptop posts what it
+// fetched to the Worker's ingest API (worker/index.ts).
 export interface Store {
 	get(key: string): Promise<string | null>;
 	put(key: string, body: string, contentType: string, cacheControl: string): Promise<unknown>;
@@ -331,28 +342,27 @@ export interface Store {
 const LIVE_CACHE = "public, max-age=60, stale-while-revalidate=300";
 const RAW_CACHE = "public, max-age=86400";
 
-// One refresh: latest snapshot per layer to live/, the same bytes to the raw archive. Returns
-// this run's results (live/status.json gets them merged with the other runner's).
-export async function refresh(store: Store, layers: readonly LayerName[], tide: boolean): Promise<Status> {
-	const now = Date.now();
-	const fetchedAt = new Date(now).toISOString();
-	const { day, hhmm } = bkkParts(now);
-	const results: Status = {};
+/** What one refresh fetched: each source's result and, where it worked, the file to publish. */
+export interface Batch {
+	fetchedAt: string;
+	results: Status;
+	files: Partial<Record<LayerName | "tide", string>>; // snapshot JSON per layer; tide table text
+}
 
+/** Fetches the given sources. Runs in the Worker (cron) and on the laptop (scripts/mirror.mjs). */
+export async function collect(layers: readonly LayerName[], tide: boolean): Promise<Batch> {
+	const fetchedAt = new Date().toISOString();
+	const batch: Batch = { fetchedAt, results: {}, files: {} };
 	await Promise.all([
 		...layers.map(async (layer) => {
 			try {
 				const features = (await SOURCES[layer].load()).filter((f): f is PointFeature => f !== null);
 				const snap: Snapshot = { type: "FeatureCollection", layer, source: SOURCES[layer].source, fetchedAt, features };
-				const body = JSON.stringify(snap);
-				await Promise.all([
-					store.put(KEY.live(`${layer}.json`), body, "application/json", LIVE_CACHE),
-					store.put(KEY.raw(layer, day, hhmm), body, "application/json", RAW_CACHE),
-				]);
-				results[layer] = { ok: true, fetchedAt, count: features.length };
+				batch.files[layer] = JSON.stringify(snap);
+				batch.results[layer] = { ok: true, fetchedAt, count: features.length };
 			} catch (e) {
 				// Keep the last good snapshot; just record the failure.
-				results[layer] = { ok: false, fetchedAt, error: String(e) };
+				batch.results[layer] = { ok: false, fetchedAt, error: String(e) };
 			}
 		}),
 		tide &&
@@ -360,17 +370,32 @@ export async function refresh(store: Store, layers: readonly LayerName[], tide: 
 				try {
 					const res = await fetch(TIDE, { signal: AbortSignal.timeout(25_000) });
 					if (!res.ok) throw new Error(`HTTP ${res.status}`);
-					await store.put(KEY.live("tide.txt"), await res.text(), "text/plain; charset=utf-8", LIVE_CACHE);
-					results.tide = { ok: true, fetchedAt };
+					batch.files.tide = await res.text();
+					batch.results.tide = { ok: true, fetchedAt };
 				} catch (e) {
-					results.tide = { ok: false, fetchedAt, error: String(e) };
+					batch.results.tide = { ok: false, fetchedAt, error: String(e) };
 				}
 			})(),
 	]);
+	return batch;
+}
 
-	// Merge into the shared status file. Both runners write it; the laptop runs offset from the
-	// cron (scripts/mirror.mjs), so the read-merge-write windows don't overlap.
+/** Publishes a batch: latest file per source to live/, layer snapshots also to the raw archive,
+ * results merged into live/status.json. */
+export async function save(store: Store, { fetchedAt, results, files }: Batch): Promise<void> {
+	const { day, hhmm } = bkkParts(Date.parse(fetchedAt));
+	await Promise.all(
+		Object.entries(files).map(([name, body]) =>
+			name === "tide"
+				? store.put(KEY.live("tide.txt"), body, "text/plain; charset=utf-8", LIVE_CACHE)
+				: Promise.all([
+						store.put(KEY.live(`${name}.json`), body, "application/json", LIVE_CACHE),
+						store.put(KEY.raw(name, day, hhmm), body, "application/json", RAW_CACHE),
+					]),
+		),
+	);
+	// Merge into the shared status file. The cron and the laptop's posts both update it; the laptop
+	// runs offset from the cron (scripts/mirror.mjs), so the read-merge-write windows don't overlap.
 	const prev: Status = JSON.parse((await store.get(KEY.live("status.json"))) ?? "{}");
 	await store.put(KEY.live("status.json"), JSON.stringify({ ...prev, ...results }), "application/json", LIVE_CACHE);
-	return results;
 }

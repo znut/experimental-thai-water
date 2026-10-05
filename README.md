@@ -1,7 +1,8 @@
 # thai-water-way
 
 Bangkok water map and flood simulation. Static app, model runs in the browser; a Worker cron pulls
-live data into R2 every 5 min; all data is public on the data domain. Free, non-commercial. Built
+live data into R2 every 5 min (sources that refuse Workers come from a laptop through the Worker's
+ingest API); all data is public on the data domain. Free, non-commercial. Built
 data lives in the sibling repo `thai-water-way-data` (contents and licences in its README).
 
 ## Run
@@ -25,6 +26,10 @@ egress); Worker = cron only (~0.1–0.2 s CPU a run, needs Workers Paid); builds
   Vite run on Node).
 - Data: `bun run data:rebuild` (rebuild all after `data:network`: node ids change), commit the data
   repo, `bun run data:publish`.
+- Live data the Worker can't fetch (BMA, ThaiWater: `RUNS_ON` in `worker/sources.ts`):
+  `caffeinate -i bun run mirror` on the laptop fetches them and posts to `POST /api/ingest`; only
+  the Worker writes R2. Key: Worker secret `INGEST_KEY` (dashboard) = `~/.config/thai-water-way/ingest-key`.
+  Dev: `INGEST_KEY=…` in `.dev.vars`, then `INGEST_URL=http://localhost:5199/api/ingest INGEST_KEY=… bun run mirror --once`.
 - Archive: `bun run data:compact` any time (R2 token in `.env`, see `.env.example`).
 - Data domain, once: set `DATA_ORIGIN` (`shared/data-layout.ts`) and add it as the bucket's custom
   domain; bucket CORS `GET, HEAD` from `*`; Cache Rules: `/v/*`, `/archive/*` edge TTL 1 year,
