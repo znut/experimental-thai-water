@@ -33,7 +33,12 @@ async function get(url: string, init?: RequestInit<RequestInitCfProperties>): Pr
 		headers: { "user-agent": "thai-water-way", accept: "application/json", ...init?.headers },
 		signal: AbortSignal.timeout(25_000),
 	});
-	if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
+	if (!res.ok) {
+		// Who refused and how (a Cloudflare block page names its rule, e.g. "error code: 1010").
+		const by = ["server", "cf-mitigated", "retry-after"].map((h) => res.headers.get(h) && `${h}=${res.headers.get(h)}`).filter(Boolean).join(" ");
+		const body = (await res.text().catch(() => "")).replace(/<(script|style)[^]*?<\/\1>|<[^>]*>/gi, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+		throw new Error(`${url} -> HTTP ${res.status} ${by} ${body}`.trim());
+	}
 	return res;
 }
 const getJson = async (url: string, init?: RequestInit<RequestInitCfProperties>): Promise<any> => (await get(url, init)).json();
@@ -295,13 +300,13 @@ export const SOURCES: Record<LayerName, { source: string; every?: number; load: 
 // addresses (429), so those run from the laptop. "tide" is the HII tide table.
 export type Runner = "worker" | "laptop";
 export const RUNS_ON: Record<LayerName | "tide", Runner> = {
-	flood: "laptop",
-	pump: "laptop",
-	smallpump: "laptop",
-	flow: "laptop",
-	level: "laptop",
-	rain: "laptop",
-	river: "laptop",
+	flood: "worker", // retest 2026-10-05: see the cron logs
+	pump: "worker", // retest 2026-10-05: see the cron logs
+	smallpump: "worker", // retest 2026-10-05: see the cron logs
+	flow: "worker", // retest 2026-10-05: see the cron logs
+	level: "worker", // retest 2026-10-05: see the cron logs
+	rain: "worker", // retest 2026-10-05: see the cron logs
+	river: "worker", // retest 2026-10-05: see the cron logs
 	reports: "worker",
 	tide: "worker",
 };
