@@ -261,13 +261,13 @@ export const SOURCES: Record<LayerName, { source: string; every?: number; load: 
 // addresses (429), so those run from the laptop. "tide" is the HII tide table.
 export type Runner = "worker" | "laptop";
 export const RUNS_ON: Record<LayerName | "tide", Runner> = {
-	flood: "worker", // retest 2026-10-05
-	pump: "worker", // retest 2026-10-05
-	smallpump: "worker", // retest 2026-10-05
-	flow: "worker", // retest 2026-10-05
-	level: "worker", // retest 2026-10-05
-	rain: "worker", // retest 2026-10-05
-	river: "worker", // retest 2026-10-05
+	flood: "laptop",
+	pump: "laptop",
+	smallpump: "laptop",
+	flow: "laptop",
+	level: "laptop",
+	rain: "laptop",
+	river: "laptop",
 	reports: "worker",
 	tide: "worker",
 };
