@@ -27,14 +27,46 @@ const bkkMs = (s: unknown) => (typeof s === "string" ? Date.parse(s.replace(" ",
 
 type Row = Record<string, any>;
 
-async function getJson(url: string, init?: RequestInit<RequestInitCfProperties>): Promise<any> {
+async function get(url: string, init?: RequestInit<RequestInitCfProperties>): Promise<Response> {
 	const res = await fetch(url, {
 		...init,
 		headers: { "user-agent": "thai-water-way", accept: "application/json", ...init?.headers },
 		signal: AbortSignal.timeout(25_000),
 	});
 	if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
-	return res.json();
+	return res;
+}
+const getJson = async (url: string, init?: RequestInit<RequestInitCfProperties>): Promise<any> => (await get(url, init)).json();
+
+// "น้ำท่วม" (flooding) as Traffy writes it (non-ASCII escaped), and unescaped in case that changes.
+const FLOOD_TAG = ["น้ำท่วม", [..."น้ำท่วม"].map((c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")).join("")];
+const FEATURE = '{"type":"Feature"';
+
+/** One Traffy page: its feature count and the features tagged as flooding. Parsing every
+ * complaint (~35 MB per refresh, ~3 in 4 not about flooding) was most of the cron's CPU, so the
+ * page is cut into features as text and only the ones tagged as flooding are parsed. */
+function traffyPage(text: string): { count: number; features: Row[] } {
+	try {
+		const parts = text.split(FEATURE);
+		const count = Number(/"count":(\d+)/.exec(parts[0])?.[1]);
+		if (parts.length - 1 !== count) throw new Error("unexpected layout");
+		const features: Row[] = [];
+		for (let i = 1; i < parts.length; i++) {
+			const p = parts[i];
+			// Its tags (problem_type_fondue) come first in the properties; free text mentioning
+			// flooding doesn't count.
+			const at = p.indexOf('"problem_type_fondue":[');
+			const tags = at < 0 ? "" : p.slice(at, p.indexOf("]", at));
+			if (!FLOOD_TAG.some((t) => tags.includes(t))) continue;
+			// Drop the separator: "," between features, "]}" after the last.
+			features.push(JSON.parse(FEATURE + p.slice(0, i < count ? -1 : p.lastIndexOf("]"))));
+		}
+		return { count, features };
+	} catch {
+		// Layout changed (spacing, key order): parse it all rather than lose reports.
+		const j = JSON.parse(text);
+		return { count: j.features?.length ?? 0, features: j.features ?? [] };
+	}
 }
 
 // BMA timestamps come as "/Date(1790852400000)/".
@@ -197,7 +229,9 @@ export const SOURCES: Record<LayerName, { source: string; every?: number; load: 
 	},
 	reports: {
 		source: "Traffy Fondue citizen flood reports (BMA / NECTEC)",
-		// The API can't filter by type: 3 days is ~8 pages (~35 MB) of all complaints.
+		// The API can't filter by type: 3 days is ~8 pages (~35 MB) of all complaints. Its
+		// problem_type filter matches the whole tag list exactly, so "อื่นๆ,น้ำท่วม" (other +
+		// flooding, ~1 in 5 flood reports) can't be asked for.
 		every: 15,
 		load: async () => {
 			// Last 3 days; keep reports still open plus anything from the last 24 h. Photos and
@@ -206,9 +240,9 @@ export const SOURCES: Record<LayerName, { source: string; every?: number; load: 
 			const day = (ms: number) => new Date(ms + 7 * 3600_000).toISOString().slice(0, 10);
 			const rows: Row[] = [];
 			for (let offset = 0; offset < 10_000; offset += 1000) {
-				const j = await getJson(`${TRAFFY}?limit=1000&offset=${offset}&start=${day(now - 3 * 86400_000)}&end=${day(now)}`);
-				rows.push(...(j.features ?? []));
-				if ((j.features ?? []).length < 1000) break;
+				const page = traffyPage(await (await get(`${TRAFFY}?limit=1000&offset=${offset}&start=${day(now - 3 * 86400_000)}&end=${day(now)}`)).text());
+				rows.push(...page.features);
+				if (page.count < 1000) break;
 			}
 			return rows
 				.filter((f) => JSON.stringify(f.properties?.problem_type_fondue ?? "").includes("น้ำท่วม"))

@@ -20,10 +20,11 @@ export default defineConfig({
 		domains: ["water.experiment.tripsters.me"],
 		workersDev: false,
 		previewUrls: false,
-		// Guard rail per invocation. The cron's share (Traffy, ~35 MB of JSON per 15 min) is the
-		// heaviest run: ~260 ms CPU during the Oct 2026 storm. Going over kills the whole run (no
-		// status.json entry, tide lost too); at 50 ms it failed almost every slot from 3 Oct.
-		limits: { cpuMs: 5_000 },
+		// Guard rail per invocation. The cron's heaviest share is Traffy (~35 MB per 15 min): parsing
+		// it all took ~70 ms in V8 during the Oct 2026 storm, ~30 ms now that only flood-tagged
+		// reports are parsed. Going over kills the whole run (no status.json entry, tide lost too):
+		// at 50 ms it failed almost every slot from 3 Oct. Set here, not in the dashboard (--strict).
+		limits: { cpuMs: 100 },
 		env: {
 			// All public data: built versions, live snapshots, archive (key layout in shared/data-layout.ts).
 			DATA: bindings.r2({ name: DATA_BUCKET }),
