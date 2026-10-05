@@ -101,10 +101,19 @@ function point(lat: unknown, lon: unknown, properties: PointFeature["properties"
 const pumpStates = (r: Row, n: number) =>
 	Array.from({ length: n }, (_, i) => r[`pump_status${i + 1}`] ?? "-").join(",");
 
-// Each source returns point features for one layer.
+/** What a source may need beyond the network: its last published snapshot, and laptop-only work. */
+export interface SourceContext {
+	previous(layer: LayerName): Promise<Snapshot | null>;
+	// News reading needs the laptop's `claude -p` (scripts/lib/news.ts), so only the mirror has it.
+	news?(prev: Snapshot | null): Promise<{ features: PointFeature[]; seen: Record<string, number> }>;
+}
+
+// Each source returns point features for one layer (and optionally extra snapshot fields).
 // `every`: refresh interval in minutes (default 5), matched to how often the source changes, so
-// slow or bulky sources aren't re-downloaded every run (polite use, less CPU).
-export const SOURCES: Record<LayerName, { source: string; every?: number; load: () => Promise<(PointFeature | null)[]> }> = {
+// slow or bulky sources aren't re-downloaded every run (polite use, less CPU). `offset`: minutes
+// after those slots, to keep a heavy source out of another one's run (CPU limit per run).
+type Loaded = (PointFeature | null)[] | { features: PointFeature[]; extra: Record<string, unknown> };
+export const SOURCES: Record<LayerName, { source: string; every?: number; offset?: number; load: (ctx: SourceContext) => Promise<Loaded> }> = {
 	flood: {
 		source: "BMA DDS road flood sensors",
 		load: async () => {
@@ -302,6 +311,16 @@ export const SOURCES: Record<LayerName, { source: string; every?: number; load: 
 				);
 		},
 	},
+	news: {
+		source: "News and traffic-radio reports (FM91, Khaosod, Matichon, Thairath, Google News), read by Claude Haiku; unverified",
+		every: 30,
+		offset: 10,
+		load: async (ctx) => {
+			if (!ctx.news) throw new Error("news runs on the laptop (scripts/lib/news.ts)");
+			const { features, seen } = await ctx.news(await ctx.previous("news"));
+			return { features, extra: { seen } };
+		},
+	},
 };
 
 // Which runner fetches each source; a file only ever comes from one of them. Both sites are
@@ -318,15 +337,16 @@ export const RUNS_ON: Record<LayerName | "tide", Runner> = {
 	rain: "laptop",
 	river: "laptop",
 	reports: "worker",
+	news: "laptop", // Claude Haiku via the laptop's claude -p
 	tide: "worker",
 };
 
 /** Sources due at this time for a runner. Runs are every 5 min; a source is due when the
- * (5-min rounded) minute is a multiple of its interval; the tide table hourly. */
+ * (5-min rounded) minute, less its offset, is a multiple of its interval; the tide table hourly. */
 export function due(ms: number, runner: Runner): { layers: LayerName[]; tide: boolean } {
 	const minute = Math.round(new Date(ms).getUTCMinutes() / 5) * 5;
 	return {
-		layers: LAYERS.filter((l) => RUNS_ON[l] === runner && minute % (SOURCES[l].every ?? 5) === 0),
+		layers: LAYERS.filter((l) => RUNS_ON[l] === runner && (minute - (SOURCES[l].offset ?? 0)) % (SOURCES[l].every ?? 5) === 0),
 		tide: RUNS_ON.tide === runner && minute % 60 === 0,
 	};
 }
@@ -350,15 +370,17 @@ export interface Batch {
 }
 
 /** Fetches the given sources. Runs in the Worker (cron) and on the laptop (scripts/mirror.mjs). */
-export async function collect(layers: readonly LayerName[], tide: boolean): Promise<Batch> {
+export async function collect(layers: readonly LayerName[], tide: boolean, ctx: SourceContext): Promise<Batch> {
 	const fetchedAt = new Date().toISOString();
 	const batch: Batch = { fetchedAt, results: {}, files: {} };
 	await Promise.all([
 		...layers.map(async (layer) => {
 			try {
-				const features = (await SOURCES[layer].load()).filter((f): f is PointFeature => f !== null);
+				const loaded = await SOURCES[layer].load(ctx);
+				const [list, extra]: [(PointFeature | null)[], Record<string, unknown>] = Array.isArray(loaded) ? [loaded, {}] : [loaded.features, loaded.extra];
+				const features = list.filter((f): f is PointFeature => f !== null);
 				const snap: Snapshot = { type: "FeatureCollection", layer, source: SOURCES[layer].source, fetchedAt, features };
-				batch.files[layer] = JSON.stringify(snap);
+				batch.files[layer] = JSON.stringify({ ...snap, ...extra });
 				batch.results[layer] = { ok: true, fetchedAt, count: features.length };
 			} catch (e) {
 				// Keep the last good snapshot; just record the failure.

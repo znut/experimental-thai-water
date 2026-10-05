@@ -15,7 +15,7 @@ export default defineConfig({
 		assets: {
 			notFoundHandling: "single-page-application",
 			// Same R2 keys as the data domain, for local dev; production clients use DATA_ORIGIN.
-			runWorkerFirst: ["/current.json", "/live/*", "/archive/*", "/v/*", "/api/*"],
+			runWorkerFirst: ["/current.json", "/live/*", "/archive/*", "/v/*", "/api/*", "/tiles/*"],
 		},
 		// Matches the dashboard (deploys run with --strict and abort on any difference).
 		domains: [APP_HOST],
@@ -32,6 +32,8 @@ export default defineConfig({
 			// Bearer key for POST /api/ingest (the laptop mirror). Set in the dashboard; the laptop
 			// reads the same key from ~/.config/thai-water-way/ingest-key. Dev: .dev.vars.
 			INGEST_KEY: bindings.secret(),
+			// GISTDA disaster API (satellite flood extent tiles, /tiles/gistda/…). Dashboard; dev: .dev.vars.
+			GISTDA_KEY: bindings.secret(),
 		},
 		// Matches the dashboard: Workers Logs (incl. the cron's console.warn) and traces kept.
 		observability: {

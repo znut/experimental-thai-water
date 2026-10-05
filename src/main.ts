@@ -22,11 +22,13 @@ const GROUPS: { title: string; items: Record<string, Toggle> }[] = [
 		title: "Now",
 		items: {
 			radar: { label: 'Rain radar, last 2 h (RainViewer)<span id="radar-time"></span>', color: "#2b8cbe", on: true, ids: [] },
+			satellite: { label: "Flooded area seen by satellite, last 7 days (GISTDA)", color: "#00a6e8", on: true, ids: ["satellite"] },
 			shade: { label: "Estimated flooded area", color: "#e6550d", on: true, ids: ["flood-shade"] },
 			flood: { label: "Flooded road sensors", color: "#d62728", on: true, ids: ["flood"] },
 			pump: { label: "Pump stations (% running)", color: "#238b45", on: true, ids: ["pump", "pump-label"] },
 			river: { label: "River stations, all Thailand (red = over bank)", color: "#b2182b", on: true, ids: ["river", "river-label"] },
 			reports: { label: "Citizen flood reports, last 3 days (Traffy)", color: "#7b3294", on: true, ids: ["reports", "reports-heat"] },
+			news: { label: "News reports, last 24 h (unverified)", color: "#e7298a", on: true, ids: ["news"] },
 		},
 	},
 	{
@@ -88,6 +90,7 @@ function addSensorLayer(layer: LayerName, snap: Snapshot, sensors: Record<string
 	if (layer === "pump") return addPumpLayer();
 	if (layer === "river") return addRiverLayer();
 	if (layer === "reports") return addReportsLayer();
+	if (layer === "news") return addNewsLayer();
 	map.addLayer({
 		id: layer,
 		type: "circle",
@@ -171,6 +174,26 @@ function addReportsLayer() {
 		},
 	});
 	popupOnClick(map, "reports");
+}
+
+// News reports: fill = reported depth (flood-depth colours; grey = no depth given), pink ring =
+// second-hand. Placed only at a district or subdistrict: bigger and fainter, it's an area.
+function addNewsLayer() {
+	const area = ["match", ["get", "precision"], ["district", "province"], 2, "subdistrict", 1, 0] as maplibregl.ExpressionSpecification;
+	map.addLayer({
+		id: "news",
+		type: "circle",
+		source: "news",
+		layout: { visibility: vis(item("news").on) },
+		paint: {
+			"circle-color": ["case", ["==", ["get", "reported_cm"], null], "#bdbdbd", ["step", ["get", "reported_cm"], FLOOD_LEGEND[0].css, ...FLOOD_LEGEND.slice(1).flatMap((l) => [l.from_cm, l.css])]],
+			"circle-radius": ["interpolate", ["linear"], ["zoom"], 8, ["+", 4, ["*", 3, area]], 14, ["+", 8, ["*", 8, area]]],
+			"circle-opacity": ["match", area, 2, 0.35, 1, 0.6, 0.9],
+			"circle-stroke-color": item("news").color,
+			"circle-stroke-width": 2,
+		},
+	});
+	popupOnClick(map, "news");
 }
 
 // River stations nationwide, coloured by ThaiWater situation level (5 = over bank).
@@ -374,8 +397,16 @@ async function renderStatus() {
 	el.classList.toggle("warn", failed.length + stale.length > 0);
 }
 
+// GISTDA's satellite flood extent (radar sees through cloud; little inside dense city blocks).
+// Tiles come through our Worker, which holds the key (worker/index.ts).
+function addSatellite() {
+	map.addSource("satellite", { type: "raster", tiles: [`${location.origin}/tiles/gistda/7days/{z}/{x}/{y}`], tileSize: 256, maxzoom: 16, attribution: "Flood extent © GISTDA" });
+	map.addLayer({ id: "satellite", type: "raster", source: "satellite", layout: { visibility: vis(item("satellite").on) }, paint: { "raster-opacity": 0.7 } }, map.getStyle().layers.find((l) => l.type === "symbol")?.id);
+}
+
 async function init() {
 	void addRadar();
+	addSatellite();
 	const [network, sensors, infra, terrain, ...snaps] = await Promise.all([
 		getJson<GeoJSON.FeatureCollection<GeoJSON.LineString> & { build?: string }>(fetchBuilt("network.geojson")),
 		getJson<Record<string, SensorSnap>>(fetchBuilt("sensors.json")),

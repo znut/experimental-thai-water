@@ -9,13 +9,31 @@
 // Key and target: scripts/lib/api.mjs.
 import { LAYERS } from "../shared/types.ts";
 import { RUNS_ON, collect, due } from "../worker/sources.ts";
-import { ORIGIN, api } from "./lib/api.mjs";
+import { KEY } from "../shared/data-layout.ts";
+import { ORIGIN, api, get } from "./lib/api.mjs";
+import { loadNews } from "./lib/news.ts";
 
-async function refresh(layers, tide) {
-	const batch = await collect(layers, tide);
+const page = async (url) => {
+	const res = await fetch(url, { headers: { "user-agent": "thai-water-way", accept: "*/*" }, signal: AbortSignal.timeout(25_000) });
+	if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
+	return res.text();
+};
+const ctx = {
+	previous: async (layer) => JSON.parse((await get(KEY.live(`${layer}.json`)))?.toString("utf8") ?? "null"),
+	news: (prev) => loadNews(prev, page),
+};
+
+async function post(layers, tide) {
+	const batch = await collect(layers, tide, ctx);
 	if (Object.keys(batch.results).length)
 		await api("/api/ingest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(batch) });
 	return batch.results;
+}
+
+// News (minutes of claude -p) goes in its own batch, so sensor layers aren't held up behind it.
+async function refresh(layers, tide) {
+	const results = await post(layers.filter((l) => l !== "news"), tide);
+	return layers.includes("news") ? { ...results, ...(await post(["news"], false)) } : results;
 }
 
 const SLOT = 5 * 60_000, OFFSET = 150_000;

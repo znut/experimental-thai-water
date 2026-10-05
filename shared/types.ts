@@ -1,4 +1,4 @@
-export const LAYERS = ["flood", "pump", "smallpump", "flow", "level", "rain", "river", "reports"] as const;
+export const LAYERS = ["flood", "pump", "smallpump", "flow", "level", "rain", "river", "reports", "news"] as const;
 export type LayerName = (typeof LAYERS)[number];
 
 export type Props = Record<string, string | number | boolean | null>;

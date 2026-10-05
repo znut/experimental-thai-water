@@ -26,8 +26,14 @@ egress); Worker = cron only (~0.1–0.2 s CPU a run, needs Workers Paid); builds
   Vite run on Node).
 - Data: `bun run data:rebuild` (rebuild all after `data:network`: node ids change), commit the data
   repo, `bun run data:publish`.
-- Live data the Worker can't fetch (BMA, ThaiWater: `RUNS_ON` in `worker/sources.ts`):
-  `caffeinate -i bun run mirror` on the laptop fetches them and posts them to the Worker.
+- Live data the Worker can't fetch (BMA, ThaiWater: `RUNS_ON` in `worker/sources.ts`) and the news
+  layer: `caffeinate -i bun run mirror` on the laptop fetches them and posts them to the Worker.
+  News (`scripts/lib/news.ts`) reads FM91 / Khaosod / Matichon / Thairath / Google News feeds every
+  30 min, asks Claude Haiku through the local `claude -p` (the user's Claude plan, no API key, no
+  tools) for place + depth, and places reports with `data/gazetteer.json` (`bun run data:gazetteer`,
+  OSM; `--cached` builds from snapshots when Overpass is slow).
+- Satellite flood extent: `/tiles/gistda/<1day|3days|7days|30days>/{z}/{x}/{y}` proxies GISTDA's
+  tiles (Thailand only, edge-cached 1 h) with the `GISTDA_KEY` Worker secret (dev: `.dev.vars`).
 - Archive: `bun run data:compact` any time.
 - Laptop scripts never hold R2 credentials: mirror, publish and compact go through the Worker's
   API (`worker/api.ts`, each route limited to the keys its script writes). Key: Worker secret
@@ -48,7 +54,7 @@ Stays available when a source site is down. Non-commercial use with attribution.
 
 | Path | What |
 |---|---|
-| `live/<layer>.json` | latest GeoJSON per layer: `flood`, `pump`, `smallpump`, `flow`, `level`, `rain`, `river`, `reports` (5–15 min) |
+| `live/<layer>.json` | latest GeoJSON per layer: `flood`, `pump`, `smallpump`, `flow`, `level`, `rain`, `river`, `reports` (5–15 min), `news` (30 min, unverified) |
 | `live/status.json`, `live/tide.txt` | refresh status per layer; HII tide forecast (hourly) |
 | `archive/raw/<layer>/<day>/<HHmm>.json` | every refresh of today, Bangkok time |
 | `archive/<layer>/<YYYY>/<day>.ndjson.gz`, `archive/index.json` | past days, one line per distinct reading (`seen_at`, `id`, `lon`, `lat`, …) |
@@ -79,7 +85,11 @@ Code: `worker/` refresh · `src/main.ts` map · `src/sim/` model, ponding, UI ·
 | HII ThaiWater, api-v3.thaiwater.net | River and canal levels nationwide, history; boundary gauges; extra rain gauges (HII, TMD, DWR, RID) |
 | HII tide table, fews2.hii.or.th | Gulf tide forecast |
 | Traffy Fondue (BMA / NECTEC), publicapi.traffy.in.th | Citizen flood reports (location, time, status only) |
-| OpenStreetMap contributors (ODbL) | Samut Prakan canals, Chao Phraya line, pond locations |
+| OpenStreetMap contributors (ODbL) | Samut Prakan canals, Chao Phraya line, pond locations; place names for news reports |
+| GISTDA disaster API, disaster.gistda.or.th | Flood extent from satellite (Sentinel-1 radar), map tiles |
+| FM91 Traffic, Khaosod, Matichon, Thairath, Google News | News flood reports: place, depth words, link (no article text kept) |
+| RainViewer | Rain radar tiles |
+| Open-Meteo | Rain forecast for the forecast scenario |
 | FABDEM V1-2, University of Bristol (CC BY-NC-SA 4.0) | Ground elevation (via per-tile mirror on Hugging Face) |
 | Copernicus GLO-30 DEM (ESA) | Alternative elevation provider; FABDEM is derived from it |
 | RID pump capacities: news reports cited per station | Samut Prakan sea pumps (5 of 8 estimated) |

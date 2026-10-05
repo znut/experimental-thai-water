@@ -107,14 +107,14 @@ const OVERPASS = ["https://maps.mail.ru/osm/tools/overpass/api/interpreter", "ht
  * Each successful answer is also saved to data/osm/<name>.json; if every mirror fails we reuse
  * that snapshot, with a warning, so a busy Overpass doesn't block the build.
  */
-export async function overpass(name, query) {
+export async function overpass(name, query, { timeoutMs = 90_000 } = {}) {
 	const snapshot = new URL(`../../data/osm/${name}.json`, import.meta.url);
 	for (const url of OVERPASS) {
 		try {
 			const text = await cachedText(
 				url,
 				{ method: "POST", body: new URLSearchParams({ data: query }) },
-				{ retries: 1, timeoutMs: 90_000, valid: (t) => t.trimStart().startsWith("{") },
+				{ retries: 1, timeoutMs, valid: (t) => t.trimStart().startsWith("{") },
 			);
 			await mkdir(new URL(".", snapshot), { recursive: true });
 			await writeFile(snapshot, text);

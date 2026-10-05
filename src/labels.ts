@@ -85,6 +85,13 @@ const FIELDS: Record<string, Fmt> = {
 	open: { label: "Ticket still open", fmt: (v) => (v ? "yes (BMA has not closed it)" : "no") },
 	age_h: { label: "Reported", fmt: (v) => (v < 1 ? "under an hour ago" : `${v} h ago`) },
 	hours_to_close: { label: "Took to resolve", fmt: (v) => `${v} h` },
+	// news reports
+	reported_cm: { label: "Reported depth", fmt: (v) => `~${v} cm` },
+	depth_text: { label: "As reported" },
+	place: { label: "Place" },
+	precision: { label: "Placed at", fmt: (v) => ({ landmark: "the named place", junction: "the named junction", road: "a point on the named road" })[v as string] ?? `${v} centre (exact spot unknown)` },
+	source: { label: "Source" },
+	url: { label: "Article", fmt: (v) => (/^https?:\/\//.test(v) ? `<a href="${esc(v)}" target="_blank" rel="noopener">open</a>` : null), html: true },
 	// timestamps
 	time: { label: "Updated", fmt: bkkTime },
 };
