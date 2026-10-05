@@ -323,7 +323,16 @@ async function renderStatus() {
 	if (!status) return void (el.textContent = "No data yet: waiting for the first refresh.");
 	const times = Object.values(status).map((s) => s?.fetchedAt).filter(Boolean).sort();
 	const failed = Object.entries(status).filter(([, s]) => !s?.ok).map(([k]) => k);
-	el.textContent = `Updated ${times.length ? bkkTime(times.at(-1)) : "never"}` + (failed.length ? ` · failing: ${failed.join(", ")}` : "");
+	// A runner that stops (laptop asleep, run killed) leaves no failure behind, only an old time.
+	// Name those layers so a days-old snapshot isn't read as current.
+	const stale = Object.entries(status)
+		.filter(([k, s]) => s?.ok && Date.now() - Date.parse(s.fetchedAt) > (k === "tide" ? 3 : 0.5) * 3600_000)
+		.map(([k, s]) => `${k} (${bkkTime(s!.fetchedAt)})`);
+	el.textContent =
+		`Updated ${times.length ? bkkTime(times.at(-1)) : "never"}` +
+		(failed.length ? ` · failing: ${failed.join(", ")}` : "") +
+		(stale.length ? ` · not updating: ${stale.join(", ")}` : "");
+	el.classList.toggle("warn", failed.length + stale.length > 0);
 }
 
 async function init() {

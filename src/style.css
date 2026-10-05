@@ -58,6 +58,9 @@ body {
 	color: var(--muted);
 	font-size: 12px;
 }
+#status.warn {
+	color: #c2410c;
+}
 .maplibregl-popup-content {
 	color: #1b1f24;
 	font-size: 12px;

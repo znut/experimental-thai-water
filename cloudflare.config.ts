@@ -21,8 +21,9 @@ export default defineConfig({
 		workersDev: false,
 		previewUrls: false,
 		// Guard rail per invocation. The cron's share (Traffy, ~35 MB of JSON per 15 min) is the
-		// heaviest run: if live/status.json shows reports failing on CPU, raise this.
-		limits: { cpuMs: 50 },
+		// heaviest run: ~260 ms CPU during the Oct 2026 storm. Going over kills the whole run (no
+		// status.json entry, tide lost too); at 50 ms it failed almost every slot from 3 Oct.
+		limits: { cpuMs: 5_000 },
 		env: {
 			// All public data: built versions, live snapshots, archive (key layout in shared/data-layout.ts).
 			DATA: bindings.r2({ name: DATA_BUCKET }),
