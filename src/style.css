@@ -99,25 +99,6 @@ body {
 #sim-chart {
 	width: 100%;
 }
-#glance {
-	margin: 4px 0 8px;
-	font-size: 12.5px;
-	line-height: 1.5;
-}
-#glance .bad {
-	color: #c0392b;
-}
-#glance .ok {
-	color: #238b45;
-}
-@media (prefers-color-scheme: dark) {
-	#glance .bad {
-		color: #ff7b6b;
-	}
-	#glance .ok {
-		color: #74c476;
-	}
-}
 #legend {
 	display: flex;
 	flex-wrap: wrap;
@@ -157,11 +138,6 @@ body {
 	background: transparent;
 	color: var(--fg);
 	cursor: pointer;
-}
-#glance .watch {
-	margin-top: 6px;
-	padding-top: 6px;
-	border-top: 1px solid rgb(127 127 127 / 0.3);
 }
 .maplibregl-popup-content .pop-title {
 	font-weight: 600;

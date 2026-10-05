@@ -5,7 +5,6 @@ import { fetchBuilt, fetchLive } from "./data.ts";
 import { drainageTree } from "./drainage.ts";
 import { FLOOD_LEGEND, FloodShade, loadGround, type Ground } from "./flood.ts";
 import { junctions, measuredFlowLines, type Edge } from "./flow.ts";
-import { pumpUse, renderGlance } from "./glance.ts";
 import { bkkTime } from "./labels.ts";
 import { inferredFlowLines, interpolateHeads, knownHeads } from "./infer.ts";
 import { addMovement, animate, popupOnClick } from "./mapkit.ts";
@@ -66,6 +65,13 @@ const getJson = async <T>(req: Promise<Response>): Promise<T | null> => {
 	return res?.ok ? res.json() : null;
 };
 const vis = (on: boolean) => (on ? "visible" : "none") as "visible" | "none";
+
+/** Pump status string "1,0,1,-,-,-" (from the Worker) -> running pumps of pump_count. */
+function pumpUse(props: Record<string, unknown>): { running: number; pumps: number } {
+	const n = Number(props.pump_count) || 0;
+	const states = String(props.pumps ?? "").split(",").slice(0, n);
+	return { running: states.filter((s) => s === "1").length, pumps: n };
+}
 
 // Road flood sensors: only wet, working ones unless "dry & broken" is on.
 const WET_FILTER: maplibregl.FilterSpecification = ["all", ["!=", ["get", "status"], "Out of order"], [">", ["coalesce", ["get", "depth_cm"], 0], 0]];
@@ -370,12 +376,11 @@ async function renderStatus() {
 
 async function init() {
 	void addRadar();
-	const [network, sensors, infra, terrain, tide, ...snaps] = await Promise.all([
+	const [network, sensors, infra, terrain, ...snaps] = await Promise.all([
 		getJson<GeoJSON.FeatureCollection<GeoJSON.LineString> & { build?: string }>(fetchBuilt("network.geojson")),
 		getJson<Record<string, SensorSnap>>(fetchBuilt("sensors.json")),
 		getJson<Infra>(fetchBuilt("infra.json")),
 		getJson<Terrain>(fetchBuilt("terrain.json")),
-		fetchLive("tide.txt").then((r) => (r.ok ? r.text() : null), () => null),
 		...LAYERS.map((l) => getJson<Snapshot>(fetchLive(`${l}.json`))),
 	]);
 	const snap = (l: LayerName) => snaps[LAYERS.indexOf(l)] ?? null;
@@ -404,12 +409,10 @@ async function init() {
 		capByNode.set(p.node, (capByNode.get(p.node) ?? 0) + p.capacity_m3s);
 		if (p.outlet === "river") outletByNode.set(p.node, "river");
 	}
-	const caps = new Map<string, number>();
 	for (const f of snap("pump")?.features ?? []) {
 		const s = sensors?.[f.properties.id];
 		const cap = s ? capByNode.get(s.node) ?? null : null;
-		if (cap) caps.set(f.properties.id, cap);
-		const u = pumpUse(f.properties, cap);
+		const u = pumpUse(f.properties);
 		Object.assign(f.properties, {
 			running: u.running,
 			use_pct: u.pumps ? Math.round((100 * u.running) / u.pumps) : 0,
@@ -427,7 +430,6 @@ async function init() {
 	await shade?.paintFromSensors(wet);
 	if (!ground) document.getElementById("legend")!.insertAdjacentHTML("beforeend", " (flood shading needs ground data)");
 
-	renderGlance(document.getElementById("glance")!, { flood: snap("flood"), pump: snap("pump"), river: snap("river"), rain: snap("rain"), reports: snap("reports"), tide, caps });
 	setupSim(map, edges, snap("level"), network?.build, { ground, liveShade: shade, wet });
 	await renderStatus();
 }

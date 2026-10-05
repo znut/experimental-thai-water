@@ -21,7 +21,8 @@ async function refresh(layers, tide) {
 const SLOT = 5 * 60_000, OFFSET = 150_000;
 const log = (results) => {
 	const t = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Bangkok" });
-	const parts = Object.entries(results).map(([k, s]) => (s.ok ? `${k} ${s.count ?? "ok"}` : `${k} FAILED ${s.error}`));
+	// Failures in short (full text in live/status.json): "pump HTTP 404".
+	const parts = Object.entries(results).map(([k, s]) => (s.ok ? `${k} ${s.count ?? "ok"}` : `${k} ${/HTTP \d{3}/.exec(s.error)?.[0] ?? s.error.slice(0, 80)}`));
 	console.log(`${t} ${parts.join(" · ") || "nothing due"}`);
 };
 
