@@ -38,8 +38,28 @@ body {
 	box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
 }
 #panel h1 {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
 	margin: 0 0 8px;
 	font-size: 16px;
+}
+#panel.collapsed h1 {
+	margin: 0;
+}
+#panel.collapsed #panel-body {
+	display: none;
+}
+#panel-toggle {
+	padding: 2px 10px;
+	border-radius: 10px;
+	border: 1px solid var(--muted);
+	background: transparent;
+	color: var(--fg);
+	font-size: 12px;
+	font-weight: normal;
+	cursor: pointer;
 }
 #layers label {
 	display: flex;
@@ -70,7 +90,7 @@ body {
 	padding-right: 8px;
 }
 #panel {
-	max-height: calc(100vh - 48px);
+	max-height: calc(100dvh - 48px);
 	overflow-y: auto;
 }
 #sim h2 {

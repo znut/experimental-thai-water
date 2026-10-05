@@ -9,16 +9,18 @@
 	<body>
 		<div id="map"></div>
 		<aside id="panel">
-			<h1>Bangkok Water Map</h1>
-			<div id="places"></div>
-			<div id="legend"></div>
-			<div id="layers"></div>
-			<p id="status">Loading…</p>
-			<section id="sim"></section>
-			<p class="credit">
-				Data: BMA Department of Drainage and Sewerage, HII ThaiWater, RID, HII tide tables, Traffy Fondue. Radar: RainViewer. Satellite flood extent: GISTDA. News reports: FM91, Khaosod, Matichon, Thairath, Google News (read by Claude). Place names © OpenStreetMap. Forecast: Open-Meteo. Ground: FABDEM V1-2 (CC BY-NC-SA,
-				University of Bristol) corrected with BMA spot heights. Map © OpenStreetMap contributors, OpenFreeMap.
-			</p>
+			<h1>Bangkok Water Map <button id="panel-toggle" type="button" aria-controls="panel-body" aria-expanded="true">Hide</button></h1>
+			<div id="panel-body">
+				<div id="places"></div>
+				<div id="legend"></div>
+				<div id="layers"></div>
+				<p id="status">Loading…</p>
+				<section id="sim"></section>
+				<p class="credit">
+					Data: BMA Department of Drainage and Sewerage, HII ThaiWater, RID, HII tide tables, Traffy Fondue. Radar: RainViewer. Satellite flood extent: GISTDA. News reports: FM91, Khaosod, Matichon, Thairath, Google News (read by Claude). Place names © OpenStreetMap. Forecast: Open-Meteo. Ground: FABDEM V1-2 (CC BY-NC-SA,
+					University of Bristol) corrected with BMA spot heights. Map © OpenStreetMap contributors, OpenFreeMap.
+				</p>
+			</div>
 		</aside>
 		<script type="module" src="/src/main.ts"></script>
 	</body>

@@ -315,12 +315,27 @@ const PLACES: { label: string; bounds: [number, number, number, number] }[] = [
 	{ label: "All Thailand", bounds: [97.3, 5.6, 105.7, 20.5] },
 ];
 
+// Side panel: collapsible; on a phone it starts collapsed and folds away after a place is picked,
+// so the map isn't hidden behind it.
+const narrow = matchMedia("(max-width: 640px)");
+function setPanel(open: boolean) {
+	document.getElementById("panel")!.classList.toggle("collapsed", !open);
+	const b = document.getElementById("panel-toggle")!;
+	b.textContent = open ? "Hide" : "Layers";
+	b.setAttribute("aria-expanded", String(open));
+}
+document.getElementById("panel-toggle")!.onclick = () => setPanel(document.getElementById("panel")!.classList.contains("collapsed"));
+setPanel(!narrow.matches);
+
 function renderPlaces() {
 	const box = document.getElementById("places")!;
 	for (const p of PLACES) {
 		const b = document.createElement("button");
 		b.textContent = p.label;
-		b.onclick = () => map.fitBounds(p.bounds, { padding: 40, duration: 800 });
+		b.onclick = () => {
+			map.fitBounds(p.bounds, { padding: 40, duration: 800 });
+			if (narrow.matches) setPanel(false);
+		};
 		box.append(b);
 	}
 }
